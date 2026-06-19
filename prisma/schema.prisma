@@ -27,6 +27,9 @@ model Session {
   status      String   @default("waiting") // waiting | active | ended
   technicianId String?
   technician  Technician? @relation(fields: [technicianId], references: [id])
+  // For unattended sessions: link to the registered machine
+  unattendedMachineId String?
+  unattendedMachine   UnattendedMachine? @relation(fields: [unattendedMachineId], references: [id])
   createdAt   DateTime @default(now())
   startedAt   DateTime?
   endedAt     DateTime?
@@ -50,4 +53,19 @@ model SessionEvent {
   type      String   // "created" | "joined" | "started" | "ended" | "file_sent" | ...
   detail    String?
   createdAt DateTime @default(now())
+}
+
+// A customer machine that has been set up for unattended access.
+// The technician can start a session to it at any time without the customer
+// needing to be present or enter a code.
+model UnattendedMachine {
+  id            String   @id @default(cuid())
+  machineCode   String   @unique // 8-char code the installer registers with
+  customerName  String   // Friendly label, e.g. "Front desk PC"
+  hostname      String?
+  os            String?
+  status        String   @default("offline") // online | offline
+  lastSeenAt    DateTime?
+  installedAt   DateTime @default(now())
+  sessions      Session[]
 }

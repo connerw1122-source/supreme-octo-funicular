@@ -1,15 +1,16 @@
 #!/bin/bash
 # =============================================================================
-#  RemoteHelp Customer Client - Mac & Linux Installer
+#  MarqueeIT Customer Client - Mac & Linux Installer
 #
 #  Usage:
 #    ./install_mac_linux.sh                  # will prompt for code & name
 #    ./install_mac_linux.sh ABC123 "Margaret"
+#    ./install_mac_linux.sh --unattended MACHINECODE
 #
 #  What this does:
 #    1. Checks Python 3.9+ is installed
 #    2. Installs the required Python packages (in a virtualenv to keep things clean)
-#    3. Launches the RemoteHelp client with your session code
+#    3. Launches the MarqueeIT client with your session code
 #
 #  Your technician will give you:
 #    - The server URL (already filled in below)
@@ -19,7 +20,7 @@
 set -e
 
 # --- CONFIGURATION -----------------------------------------------------------
-# Your technician's RemoteHelp server URL. Edit this if your technician gave
+# Your technician's MarqueeIT server URL. Edit this if your technician gave
 # you a different URL.
 SERVER_URL="https://preview-YOUR-BOT-ID.space-z.ai"
 
@@ -35,7 +36,7 @@ fi
 
 echo ""
 echo "============================================"
-echo "  RemoteHelp - Mac/Linux Installer"
+echo "  MarqueeIT - Mac/Linux Installer"
 echo "============================================"
 echo "Server: $SERVER_URL"
 echo ""
@@ -93,6 +94,7 @@ python -m pip install --quiet \
     python-socketio \
     numpy \
     av \
+    aiohttp \
     opencv-python-headless \
     tk || {
         # On Linux, tkinter may need a system package - try without it
@@ -110,14 +112,30 @@ python -m pip install --quiet \
             python-socketio \
             numpy \
             av \
+            aiohttp \
             opencv-python-headless
     }
 echo "Done."
 echo ""
 
 # --- Launch client -----------------------------------------------------------
-echo "[3/3] Launching RemoteHelp client..."
+echo "[3/3] Launching MarqueeIT client..."
 echo ""
+
+# Handle --unattended mode
+if [[ "$1" == "--unattended" ]]; then
+    if [[ -z "$2" ]]; then
+        echo "ERROR: --unattended requires a machine code"
+        exit 1
+    fi
+    MACHINE_CODE="$2"
+    echo "Starting unattended mode with machine code $MACHINE_CODE..."
+    export REMOTEHELP_SERVER="$SERVER_URL"
+    exec python "$CLIENT_SCRIPT" \
+        --unattended "$MACHINE_CODE" \
+        --server "$SERVER_URL" \
+        --no-ui
+fi
 
 # Parse args
 SESSION_CODE="${1:-}"

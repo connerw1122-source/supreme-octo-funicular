@@ -2,26 +2,45 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { LandingView } from '@/components/landing-view'
+import { LoginView } from '@/components/login-view'
 import { TechnicianDashboard } from '@/components/technician-dashboard'
 import { CustomerDownload } from '@/components/customer-download'
 import { SessionView } from '@/components/session-view'
 import { Toaster } from 'sonner'
+import { clearSession, getSession } from '@/lib/auth'
 
 type View =
   | { name: 'landing' }
+  | { name: 'login' }
   | { name: 'technician'; technicianName: string }
   | { name: 'customer-download'; code: string }
   | {
       name: 'session'
-      role: 'technician'
       roomCode: string
       displayName: string
       sessionTitle: string
       sessionId: string
     }
 
+// Compute the initial view once: if a session is already saved in localStorage
+// (from a previous login), boot straight into the technician dashboard.
+function getInitialView(): View {
+  if (typeof window === 'undefined') return { name: 'landing' }
+  // Hash takes priority: #join/CODE
+  const hash = window.location.hash
+  const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)/)
+  if (joinMatch) {
+    return { name: 'customer-download', code: joinMatch[1].toUpperCase() }
+  }
+  const session = getSession()
+  if (session) {
+    return { name: 'technician', technicianName: session.username }
+  }
+  return { name: 'landing' }
+}
+
 export default function Home() {
-  const [view, setView] = useState<View>({ name: 'landing' })
+  const [view, setView] = useState<View>(getInitialView)
 
   // ---------------------------------------------------------------------------
   // Hash-based routing for the customer download link: #join/CODE
@@ -29,13 +48,13 @@ export default function Home() {
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash
-      const match = hash.match(/^#join\/([A-Za-z0-9]+)/)
-      if (match) {
-        const code = match[1].toUpperCase()
+      const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)/)
+      if (joinMatch) {
+        const code = joinMatch[1].toUpperCase()
         setView({ name: 'customer-download', code })
+        return
       }
     }
-    applyHash()
     window.addEventListener('hashchange', applyHash)
     return () => window.removeEventListener('hashchange', applyHash)
   }, [])
@@ -50,8 +69,16 @@ export default function Home() {
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
-  const handleTechnician = useCallback((technicianName: string) => {
-    setView({ name: 'technician', technicianName })
+  const handleTechnicianLogin = useCallback(() => {
+    setView({ name: 'login' })
+  }, [])
+
+  const handleLoginSuccess = useCallback((username: string) => {
+    setView({ name: 'technician', technicianName: username })
+  }, [])
+
+  const handleLoginBack = useCallback(() => {
+    setView({ name: 'landing' })
   }, [])
 
   const handleCustomer = useCallback((code: string) => {
@@ -62,29 +89,35 @@ export default function Home() {
     setView({ name: 'landing' })
   }, [])
 
+  const handleLogout = useCallback(() => {
+    clearSession()
+    setView({ name: 'landing' })
+  }, [])
+
   const handleJoinSession = useCallback(
     (sessionId: string, code: string, title: string) => {
-      if (view.name !== 'technician') return
-      setView({
-        name: 'session',
-        role: 'technician',
-        roomCode: code,
-        displayName: view.technicianName,
-        sessionTitle: title,
-        sessionId,
+      setView((current) => {
+        if (current.name !== 'technician') return current
+        return {
+          name: 'session',
+          roomCode: code,
+          displayName: current.technicianName,
+          sessionTitle: title,
+          sessionId,
+        }
       })
     },
-    [view]
+    []
   )
 
   const handleExitSession = useCallback(() => {
-    // For technician: go back to dashboard
-    if (view.name === 'session' && view.role === 'technician') {
-      setView({ name: 'technician', technicianName: view.displayName })
-    } else {
-      setView({ name: 'landing' })
-    }
-  }, [view])
+    setView((current) => {
+      if (current.name === 'session') {
+        return { name: 'technician', technicianName: current.displayName }
+      }
+      return { name: 'landing' }
+    })
+  }, [])
 
   // ---------------------------------------------------------------------------
   // Render
@@ -93,12 +126,16 @@ export default function Home() {
     <>
       <Toaster position="top-right" richColors closeButton />
       {view.name === 'landing' && (
-        <LandingView onTechnician={handleTechnician} onCustomer={handleCustomer} />
+        <LandingView onCustomer={handleCustomer} onTechnicianLogin={handleTechnicianLogin} />
+      )}
+      {view.name === 'login' && (
+        <LoginView onBack={handleLoginBack} onSuccess={handleLoginSuccess} />
       )}
       {view.name === 'technician' && (
         <TechnicianDashboard
           technicianName={view.technicianName}
           onBack={handleBackToLanding}
+          onLogout={handleLogout}
           onJoinSession={handleJoinSession}
         />
       )}
@@ -107,7 +144,6 @@ export default function Home() {
       )}
       {view.name === 'session' && (
         <SessionView
-          role="technician"
           roomCode={view.roomCode}
           displayName={view.displayName}
           sessionTitle={view.sessionTitle}
@@ -119,3 +155,4 @@ export default function Home() {
     </>
   )
 }
+

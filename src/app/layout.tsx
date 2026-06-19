@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RemoteHelp — Friendly remote IT support",
-  description: "A ScreenConnect-style remote IT assistance tool with one-click join links. Designed for older adults.",
+  title: "MarqueeIT — Remote IT Support",
+  description: "Remote IT assistance platform by MarqueeIT.",
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },

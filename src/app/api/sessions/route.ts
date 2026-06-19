@@ -21,12 +21,16 @@ async function generateUniqueCode(): Promise<string> {
 }
 
 // POST /api/sessions
-// Body: { title: string, technicianName: string }
+// Body: { title: string, technicianName: string, unattendedMachineCode?: string }
+// If unattendedMachineCode is provided, the session is created against that
+// pre-registered machine. The customer's unattended client will pick up the
+// session on its next heartbeat.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const title = (body?.title ?? '').toString().trim()
     const technicianName = (body?.technicianName ?? 'Technician').toString().trim()
+    const unattendedMachineCode = (body?.unattendedMachineCode ?? '').toString().trim().toUpperCase() || null
 
     if (!title) {
       return NextResponse.json({ error: 'Title is required' }, { status: 400 })
@@ -40,10 +44,24 @@ export async function POST(req: NextRequest) {
       technician = await db.technician.create({
         data: {
           name: technicianName,
-          email: `${technicianName.toLowerCase().replace(/\s+/g, '.')}@remotehelp.local`,
+          email: `${technicianName.toLowerCase().replace(/\s+/g, '.')}@marqueeit.local`,
           pin: '0000',
         },
       })
+    }
+
+    // Look up unattended machine if provided
+    let unattendedMachineId: string | undefined
+    let customerName: string | undefined
+    if (unattendedMachineCode) {
+      const machine = await db.unattendedMachine.findUnique({
+        where: { machineCode: unattendedMachineCode },
+      })
+      if (!machine) {
+        return NextResponse.json({ error: 'Unattended machine not found' }, { status: 404 })
+      }
+      unattendedMachineId = machine.id
+      customerName = machine.customerName
     }
 
     const session = await db.session.create({
@@ -51,8 +69,16 @@ export async function POST(req: NextRequest) {
         code,
         title,
         technicianId: technician.id,
+        ...(unattendedMachineId ? { unattendedMachineId } : {}),
+        ...(customerName ? { customerName } : {}),
+        status: unattendedMachineId ? 'waiting' : 'waiting',
         events: {
-          create: { type: 'created', detail: `Session created by ${technicianName}` },
+          create: {
+            type: 'created',
+            detail: unattendedMachineId
+              ? `Unattended session created by ${technicianName} for machine ${unattendedMachineCode}`
+              : `Session created by ${technicianName}`,
+          },
         },
       },
       include: { technician: true },

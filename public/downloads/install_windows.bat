@@ -1,13 +1,14 @@
 @echo off
 REM ===========================================================================
-REM  RemoteHelp Customer Client - Windows Installer
+REM  MarqueeIT Customer Client - Windows Installer
 REM  Usage: double-click this file, OR run from Command Prompt:
 REM    install_windows.bat ABC123 "Margaret"
+REM    install_windows.bat --unattended MACHINECODE
 REM
 REM  What this does:
 REM    1. Checks Python is installed (and offers to install it if not)
 REM    2. Installs the required Python packages
-REM    3. Launches the RemoteHelp client with your session code
+REM    3. Launches the MarqueeIT client with your session code
 REM
 REM  Your technician will give you:
 REM    - The server URL (already filled in below)
@@ -34,7 +35,7 @@ if not exist "%CLIENT_SCRIPT%" (
 
 echo.
 echo ============================================
-echo   RemoteHelp - Windows Installer
+echo   MarqueeIT - Windows Installer
 echo ============================================
 echo Server: %SERVER_URL%
 echo.
@@ -77,6 +78,7 @@ echo [2/3] Installing required packages (one-time setup, may take a minute)...
     python-socketio ^
     numpy ^
     av ^
+    aiohttp ^
     opencv-python-headless
 
 if errorlevel 1 (
@@ -89,8 +91,25 @@ echo Done.
 echo.
 
 REM --- Launch client --------------------------------------------------------
-echo [3/3] Launching RemoteHelp client...
+echo [3/3] Launching MarqueeIT client...
 echo.
+
+REM Handle --unattended mode
+set "FIRST_ARG=%~1"
+if "%FIRST_ARG%"=="--unattended" (
+    if "%~2"=="" (
+        echo ERROR: --unattended requires a machine code
+        pause
+        exit /b 1
+    )
+    echo Starting unattended mode with machine code %~2...
+    set "REMOTEHELP_SERVER=%SERVER_URL%"
+    %PYTHON% "%CLIENT_SCRIPT%" --unattended "%~2" --server "%SERVER_URL%" --no-ui
+    echo.
+    echo Unattended access stopped. Press any key to close.
+    pause >nul
+    exit /b 0
+)
 
 REM Take code from first arg, or prompt
 if "%~1"=="" (
@@ -114,7 +133,7 @@ if "!SESSION_CODE!"=="" (
 
 echo.
 echo Starting session !SESSION_CODE! ...
-echo You can close this window once the RemoteHelp status window appears.
+echo You can close this window once the MarqueeIT status window appears.
 echo.
 
 set "REMOTEHELP_SERVER=%SERVER_URL%"

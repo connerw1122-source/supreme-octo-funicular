@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RemoteHelp Customer Client
+MarqueeIT Customer Client
 ==========================
 
 A small desktop application that lets a trusted technician remotely view
@@ -464,7 +464,7 @@ def _start_ui(client: RemoteHelpClient, code: str):
         return
 
     root = tk.Tk()
-    root.title(f"RemoteHelp - Session {code}")
+    root.title(f"MarqueeIT - Session {code}")
     root.geometry("440x360")
     root.resizable(False, False)
 
@@ -480,7 +480,7 @@ def _start_ui(client: RemoteHelpClient, code: str):
     header.pack(fill="x")
     title = ttk.Label(
         header,
-        text="RemoteHelp Active",
+        text="MarqueeIT Active",
         font=("TkDefaultFont", 16, "bold"),
     )
     title.pack(anchor="w")
@@ -537,7 +537,7 @@ def _start_ui(client: RemoteHelpClient, code: str):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="RemoteHelp Customer Client",
+        description="MarqueeIT Customer Client",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--code", help="6-character session code (will prompt if omitted)")
@@ -548,11 +548,188 @@ def parse_args():
         help=f"Signaling server URL (default: {DEFAULT_SERVER})",
     )
     parser.add_argument("--no-ui", action="store_true", help="Run without the Tkinter status window")
+    parser.add_argument(
+        "--unattended",
+        metavar="MACHINE_CODE",
+        help="Run in unattended mode. MACHINE_CODE is the 8-character setup code your technician generated. The client registers itself, sets up auto-start on boot, and listens for incoming sessions.",
+    )
     return parser.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Unattended mode
+# ---------------------------------------------------------------------------
+
+async def run_unattended(machine_code: str, server_url: str, no_ui: bool):
+    """Register this machine with the server and run a perpetual heartbeat loop.
+    When the technician creates a session targeting this machine, we receive the
+    session code in our heartbeat response and start a normal client session."""
+    import platform
+    import aiohttp
+
+    hostname = platform.node()
+    os_desc = f"{platform.system()} {platform.release()}"
+
+    register_url = f"{server_url}/api/unattended/{machine_code}/register"
+    heartbeat_url = f"{server_url}/api/unattended/{machine_code}/heartbeat"
+
+    log.info(f"Registering unattended machine {machine_code} with {server_url}...")
+    async with aiohttp.ClientSession() as http:
+        try:
+            async with http.post(register_url, json={"hostname": hostname, "os": os_desc}) as resp:
+                if resp.status >= 400:
+                    text = await resp.text()
+                    log.error(f"Registration failed ({resp.status}): {text}")
+                    print(f"\nERROR: Could not register this machine with the server.")
+                    print(f"  Server said: {text}")
+                    print(f"\nCheck that the machine code {machine_code} is correct and")
+                    print(f"that your technician generated it from the MarqueeIT dashboard.")
+                    return
+                data = await resp.json()
+                log.info(f"Registered as: {data.get('customerName')} (status={data.get('status')})")
+        except Exception as e:
+            log.error(f"Registration error: {e}")
+            print(f"\nERROR: Could not reach the server at {server_url}")
+            print(f"  {e}")
+            return
+
+    print(f"\nMarqueeIT unattended access is now set up on this machine.")
+    print(f"  Machine code: {machine_code}")
+    print(f"  Hostname:     {hostname}")
+    print(f"  OS:           {os_desc}")
+    print(f"\nYour technician can now connect to this machine any time from the")
+    print(f"MarqueeIT dashboard.")
+    print(f"\nThis window must stay open while unattended access is active.")
+    print(f"Press Ctrl+C to stop.\n")
+
+    # Optionally install auto-start
+    try:
+        install_autostart(server_url, machine_code)
+    except Exception as e:
+        log.warning(f"Auto-start install failed (non-fatal): {e}")
+
+    # Main heartbeat loop
+    while True:
+        try:
+            async with aiohttp.ClientSession() as http:
+                async with http.post(heartbeat_url, json={"hostname": hostname, "os": os_desc}) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        pending_code = data.get("pendingSessionCode")
+                        pending_id = data.get("pendingSessionId")
+                        if pending_code:
+                            log.info(f"Technician is connecting. Joining session {pending_code}...")
+                            print(f"\n>> Incoming session from technician. Joining {pending_code}...")
+                            # Mark session as active via /join endpoint
+                            async with http.post(
+                                f"{server_url}/api/sessions/{pending_code}/join",
+                                json={"customerName": data.get("customerName", hostname)},
+                            ) as _:
+                                pass
+                            # Start a normal client session for this code
+                            client = RemoteHelpClient(
+                                code=pending_code,
+                                name=hostname,
+                                signaling_url=server_url,
+                            )
+                            if not no_ui:
+                                ui_thread = threading.Thread(
+                                    target=_start_ui, args=(client, pending_code), daemon=True
+                                )
+                                ui_thread.start()
+                            await client.run()
+                            log.info("Session ended. Returning to heartbeat loop.")
+                            print("\n<< Session ended. Listening for new connections...")
+        except Exception as e:
+            log.warning(f"Heartbeat error: {e}")
+        await asyncio.sleep(10)  # Heartbeat every 10 seconds
+
+
+def install_autostart(server_url: str, machine_code: str):
+    """Install this script as a startup item so unattended access survives reboots."""
+    import sys
+    script_path = os.path.abspath(__file__)
+    py = sys.executable
+
+    if sys.platform == "win32":
+        # Windows: add a registry Run entry
+        import winreg
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE) as key:
+                cmd = f'"{py}" "{script_path}" --unattended {machine_code} --server {server_url} --no-ui'
+                winreg.SetValueEx(key, "MarqueeIT_Unattended", 0, winreg.REG_SZ, cmd)
+            log.info("Installed auto-start via Windows registry (HKCU\\...\\Run)")
+        except Exception as e:
+            log.warning(f"Could not install Windows auto-start: {e}")
+
+    elif sys.platform == "darwin":
+        # Mac: write a LaunchAgent plist
+        plist_path = os.path.expanduser("~/Library/LaunchAgents/com.marqueeit.unattended.plist")
+        os.makedirs(os.path.dirname(plist_path), exist_ok=True)
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.marqueeit.unattended</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{py}</string>
+        <string>{script_path}</string>
+        <string>--unattended</string>
+        <string>{machine_code}</string>
+        <string>--server</string>
+        <string>{server_url}</string>
+        <string>--no-ui</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>
+"""
+        with open(plist_path, "w") as f:
+            f.write(plist)
+        log.info(f"Installed auto-start via launchd plist: {plist_path}")
+
+    else:
+        # Linux: write a systemd user unit
+        unit_path = os.path.expanduser("~/.config/systemd/user/marqueeit-unattended.service")
+        os.makedirs(os.path.dirname(unit_path), exist_ok=True)
+        unit = f"""[Unit]
+Description=MarqueeIT Unattended Access
+After=network.target
+
+[Service]
+ExecStart={py} {script_path} --unattended {machine_code} --server {server_url} --no-ui
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+"""
+        with open(unit_path, "w") as f:
+            f.write(unit)
+        log.info(f"Installed systemd user unit: {unit_path}")
+        log.info("Enable it with: systemctl --user enable --now marqueeit-unattended.service")
 
 
 async def main_async():
     args = parse_args()
+
+    # Unattended mode takes a different code path
+    if args.unattended:
+        machine_code = args.unattended.upper().strip()
+        if len(machine_code) < 4:
+            print("Invalid machine code.")
+            sys.exit(1)
+        try:
+            await run_unattended(machine_code, args.server, args.no_ui)
+        except KeyboardInterrupt:
+            print("\nStopping unattended access.")
+        return
 
     code = args.code
     name = args.name
@@ -571,7 +748,7 @@ async def main_async():
         print("Invalid code. Exiting.")
         sys.exit(1)
 
-    print(f"\nRemoteHelp starting...\n  Server: {args.server}\n  Code: {code}\n  Name: {name}\n")
+    print(f"\nMarqueeIT starting...\n  Server: {args.server}\n  Code: {code}\n  Name: {name}\n")
 
     client = RemoteHelpClient(code=code, name=name, signaling_url=args.server)
 

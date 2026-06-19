@@ -428,6 +428,13 @@ export function SessionView({
       {/* Header */}
       <header className="border-b border-slate-800 bg-slate-900 px-4 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded bg-[#1B3A6B] text-[#FFC425] flex items-center justify-center font-black text-sm">
+              M
+            </div>
+            <span className="text-base font-bold tracking-tight text-white hidden sm:inline">MarqueeIT</span>
+          </div>
+          <div className="h-6 w-px bg-slate-700" />
           <Button variant="ghost" size="sm" onClick={onExit} className="text-slate-300 hover:text-white">
             <ArrowLeft className="w-4 h-4 mr-1" />
             Exit
@@ -438,7 +445,7 @@ export function SessionView({
               <h1 className="font-semibold text-white">{sessionTitle}</h1>
               <Badge
                 variant="outline"
-                className="bg-emerald-950/50 text-emerald-400 border-emerald-800"
+                className="bg-[#1B3A6B]/50 text-[#FFC425] border-[#1B3A6B]"
               >
                 TECHNICIAN
               </Badge>
@@ -448,7 +455,7 @@ export function SessionView({
               <button onClick={copyCode} className="font-mono font-bold text-slate-200 hover:text-white">
                 {roomCode}
               </button>
-              {copiedCode && <Check className="inline w-3 h-3 ml-1 text-emerald-400" />}
+              {copiedCode && <Check className="inline w-3 h-3 ml-1 text-[#FFC425]" />}
               {peer && <span className="ml-2">· Connected to {peer.name} (customer)</span>}
             </p>
           </div>
@@ -458,7 +465,7 @@ export function SessionView({
           <div className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-slate-800">
             {session.connected ? (
               <>
-                <Circle className="w-2 h-2 fill-emerald-400 text-emerald-400" />
+                <Circle className="w-2 h-2 fill-[#FFC425] text-[#FFC425]" />
                 <span className="text-slate-300">Socket</span>
               </>
             ) : (
@@ -471,7 +478,7 @@ export function SessionView({
           <div className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-slate-800">
             {iceConnected ? (
               <>
-                <Circle className="w-2 h-2 fill-emerald-400 text-emerald-400" />
+                <Circle className="w-2 h-2 fill-[#FFC425] text-[#FFC425]" />
                 <span className="text-slate-300">WebRTC</span>
               </>
             ) : (
@@ -534,8 +541,8 @@ export function SessionView({
 
             {/* Remote control overlay - dims the edges when active */}
             {controlMode && isTechnician && (
-              <div className="absolute inset-0 ring-4 ring-emerald-500/60 ring-inset pointer-events-none">
-                <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2 font-semibold">
+              <div className="absolute inset-0 ring-4 ring-[#FFC425]/70 ring-inset pointer-events-none">
+                <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-[#1B3A6B] text-[#FFC425] text-xs px-3 py-1.5 rounded-full shadow-lg flex items-center gap-2 font-semibold">
                   <MousePointer2 className="w-3.5 h-3.5" />
                   Remote Control Active — your mouse and keyboard are controlling the customer's screen
                 </div>
@@ -620,7 +627,7 @@ export function SessionView({
                 <div className="flex items-center gap-3">
                   <TooltipProvider>
                     <div className="flex items-center gap-2 bg-slate-800 rounded-md px-3 py-1.5">
-                      <MousePointer2 className={`w-4 h-4 ${controlMode ? 'text-emerald-400' : 'text-slate-400'}`} />
+                      <MousePointer2 className={`w-4 h-4 ${controlMode ? 'text-[#FFC425]' : 'text-slate-400'}`} />
                       <Label htmlFor="ctrl-toggle" className="text-xs font-medium text-slate-200 cursor-pointer">
                         Remote Control
                       </Label>
@@ -639,7 +646,7 @@ export function SessionView({
                         }}
                       />
                       {controlMode ? (
-                        <Badge variant="outline" className="ml-1 bg-emerald-950/60 text-emerald-300 border-emerald-800 text-[10px]">
+                        <Badge variant="outline" className="ml-1 bg-[#1B3A6B]/60 text-[#FFC425] border-[#1B3A6B] text-[10px]">
                           ACTIVE
                         </Badge>
                       ) : !controlAvailable ? (
@@ -670,14 +677,14 @@ export function SessionView({
                           </Button>
                         </TooltipTrigger>
                         <TooltipContent className="max-w-xs">
-                          <p>The customer needs to run the RemoteHelp desktop app for full remote control. Copy this link and send it to them.</p>
+                          <p>The customer needs to run the MarqueeIT desktop app for full remote control. Copy this link and send it to them.</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   )}
                   {controlMode && lastInputSent > 0 && (
-                    <span className="text-[10px] text-emerald-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-[10px] text-[#FFC425] flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#FFC425] animate-pulse" />
                       Sending input
                     </span>
                   )}
@@ -750,7 +757,7 @@ export function SessionView({
                           <div
                             className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                               isMine
-                                ? 'bg-emerald-600 text-white'
+                                ? 'bg-[#1B3A6B] text-white'
                                 : m.sender === 'System'
                                 ? 'bg-slate-800 text-slate-300 italic text-xs'
                                 : 'bg-slate-800 text-slate-100'
@@ -785,7 +792,7 @@ export function SessionView({
                   placeholder="Type a message…"
                   className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500"
                 />
-                <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()} className="bg-emerald-600 hover:bg-emerald-700">
+                <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()} className="bg-[#1B3A6B] hover:bg-[#0F2A52]">
                   <Send className="w-4 h-4" />
                 </Button>
               </div>
@@ -829,7 +836,7 @@ export function SessionView({
                             </p>
                           </div>
                           {f.done && (
-                            <Badge variant="outline" className="bg-emerald-900/50 text-emerald-300 border-emerald-800">
+                            <Badge variant="outline" className="bg-[#1B3A6B]/50 text-[#FFC425] border-[#1B3A6B]">
                               <Check className="w-3 h-3 mr-1" />
                               Saved
                             </Badge>
@@ -849,13 +856,13 @@ export function SessionView({
             <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Participants</div>
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-sm">
-                <div className={`w-2 h-2 rounded-full ${session.connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                <div className={`w-2 h-2 rounded-full ${session.connected ? 'bg-[#FFC425]' : 'bg-slate-600'}`} />
                 <span className="text-slate-200">{displayName}</span>
                 <span className="text-slate-500 text-xs">(you · technician)</span>
               </div>
               {peers.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 text-sm">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <div className="w-2 h-2 rounded-full bg-[#FFC425]" />
                   <span className="text-slate-200">{p.name}</span>
                   <span className="text-slate-500 text-xs">({p.role})</span>
                 </div>
@@ -894,7 +901,7 @@ function WaitingForCustomer({
     <div className="text-center px-6 max-w-2xl mx-auto">
       <div className="w-20 h-20 rounded-full bg-slate-800 flex items-center justify-center mx-auto mb-6">
         {peerPresent ? (
-          <Loader2 className="w-10 h-10 text-emerald-400 animate-spin" />
+          <Loader2 className="w-10 h-10 text-[#FFC425] animate-spin" />
         ) : (
           <Monitor className="w-10 h-10 text-slate-500" />
         )}
@@ -910,13 +917,13 @@ function WaitingForCustomer({
       {!peerPresent && (
         <div className="space-y-3 max-w-md mx-auto">
           {/* Primary CTA: send the join link */}
-          <div className="bg-slate-800 rounded-lg p-4 text-left border border-emerald-700/40">
-            <p className="text-[10px] text-emerald-400 uppercase tracking-wide mb-1">Send this to your customer</p>
+          <div className="bg-slate-800 rounded-lg p-4 text-left border border-[#1B3A6B]/40">
+            <p className="text-[10px] text-[#FFC425] uppercase tracking-wide mb-1">Send this to your customer</p>
             <p className="text-sm font-semibold text-white mb-1">Customer join link</p>
             <p className="text-[11px] text-slate-400 mb-3">
               They open this link in their browser, download the helper app for their computer, and run it. The app will ask for the code below.
             </p>
-            <Button onClick={copyLink} size="sm" className="bg-emerald-600 hover:bg-emerald-700 w-full">
+            <Button onClick={copyLink} size="sm" className="bg-[#1B3A6B] hover:bg-[#0F2A52] w-full">
               {copied === 'link' ? <Check className="w-3.5 h-3.5 mr-1.5" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
               {copied === 'link' ? 'Copied!' : 'Copy customer join link'}
             </Button>
@@ -928,9 +935,9 @@ function WaitingForCustomer({
             className="w-full bg-slate-800 hover:bg-slate-700 transition-colors rounded-lg p-4 text-left"
           >
             <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Session code (in case they need it)</p>
-            <p className="font-mono text-3xl font-bold text-emerald-400 tracking-wider flex items-center gap-2">
+            <p className="font-mono text-3xl font-bold text-[#FFC425] tracking-wider flex items-center gap-2">
               {code}
-              {copied === 'code' && <Check className="w-5 h-5 text-emerald-300" />}
+              {copied === 'code' && <Check className="w-5 h-5 text-[#FFC425]" />}
             </p>
             <p className="text-[10px] text-slate-500 mt-1">Click to copy</p>
           </button>
