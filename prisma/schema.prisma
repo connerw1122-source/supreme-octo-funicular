@@ -1,0 +1,53 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Technician {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  pin       String   // Simple PIN-based login for demo
+  createdAt DateTime @default(now())
+  sessions  Session[]
+}
+
+model Session {
+  id          String   @id @default(cuid())
+  code        String   @unique // 6-character code customers enter
+  title       String   // Friendly description, e.g. "Help with printer"
+  customerName String?
+  status      String   @default("waiting") // waiting | active | ended
+  technicianId String?
+  technician  Technician? @relation(fields: [technicianId], references: [id])
+  createdAt   DateTime @default(now())
+  startedAt   DateTime?
+  endedAt     DateTime?
+  messages    ChatMessage[]
+  events      SessionEvent[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sender    String   // "technician" | "customer" | "system"
+  content   String
+  createdAt DateTime @default(now())
+}
+
+model SessionEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  session   Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  type      String   // "created" | "joined" | "started" | "ended" | "file_sent" | ...
+  detail    String?
+  createdAt DateTime @default(now())
+}
