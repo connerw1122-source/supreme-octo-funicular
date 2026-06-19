@@ -32,12 +32,14 @@ services:
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - DATABASE_URL=file:/app/db/marqueeit.db
-      # Auth credentials for the technician login
-      - TECH_USERNAME=Yoda
-      - TECH_PASSWORD=changeme
-      # Public URL where customers reach this server (used by the Go client
-      # to know where to connect). Set this to your real domain or IP.
-      - PUBLIC_URL=http://localhost
+      # Auth credentials for the technician login (override in .env)
+      - TECH_USERNAME=${TECH_USERNAME:-Yoda}
+      - TECH_PASSWORD=${TECH_PASSWORD:-changeme}
+      # Public URL where customers reach this server. CRITICAL: this must be
+      # set to your real public URL (e.g. https://support.example.com) because
+      # the launcher scripts embed it so the customer's Go binary knows where
+      # to connect. Override in .env.
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost}
     volumes:
       - db-data:/app/db
     # Don't expose port 3000 to the host — Caddy proxies to it internally

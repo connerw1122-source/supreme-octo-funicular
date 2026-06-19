@@ -26,10 +26,21 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid code' }, { status: 400 })
   }
 
-  // Determine the public server URL. We use the request's origin so the
-  // launcher downloads the binary from the same server the customer is
-  // already connected to.
-  const origin = url.origin
+  // Determine the public server URL.
+  // Priority: PUBLIC_URL env var > x-forwarded-proto + x-forwarded-host > host header
+  // Behind a reverse proxy (Caddy/Nginx), req.url is just the path
+  // (/api/launcher/linux?...), so url.origin would be "http://localhost".
+  const publicUrl = process.env.PUBLIC_URL
+  let origin: string
+  if (publicUrl) {
+    origin = publicUrl.replace(/\/+$/, '') // trim trailing slash
+  } else {
+    const forwardedProto = req.headers.get('x-forwarded-proto') || 'https'
+    const forwardedHost = req.headers.get('x-forwarded-host')
+    const host = req.headers.get('host')
+    const realHost = forwardedHost || host || url.host
+    origin = `${forwardedProto}://${realHost}`
+  }
 
   // Escape args for shell safety (basic — only allow alphanumerics, space, dash, apostrophe)
   const safeName = name.replace(/[^a-zA-Z0-9 \-']/g, '').slice(0, 50)
