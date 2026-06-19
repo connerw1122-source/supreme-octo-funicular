@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Monitor, Headset, ArrowRight, ShieldCheck, MousePointer2, Eye } from 'lucide-react'
+import { Monitor, Headset, ArrowRight, ShieldCheck, MousePointer2, Download } from 'lucide-react'
 
 interface LandingViewProps {
   onTechnician: (name: string) => void
@@ -46,9 +46,10 @@ export function LandingView({ onTechnician, onCustomer }: LandingViewProps) {
             Get help with your computer, <span className="text-emerald-600">simply</span>
           </h2>
           <p className="text-lg text-slate-600 max-w-2xl mx-auto">
-            A friendly remote support tool built for clarity. Technicians create a session, share a
-            6-character code, and you&apos;re connected in seconds — with the option to install a
-            one-click helper app for full mouse and keyboard control.
+            A friendly remote support tool built for clarity. Your technician gives you a 6-character
+            code — enter it below to download a small helper app, and you&apos;re connected in
+            minutes. Your technician can see your screen, point things out, and even drive your
+            mouse and keyboard with your permission.
           </p>
         </div>
 
@@ -96,7 +97,7 @@ export function LandingView({ onTechnician, onCustomer }: LandingViewProps) {
               </div>
               <CardTitle className="text-xl">I Have a Support Code</CardTitle>
               <CardDescription>
-                Your technician gave you a 6-character code. Enter it below to connect.
+                Your technician gave you a 6-character code. Enter it below to download the helper app.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -120,7 +121,8 @@ export function LandingView({ onTechnician, onCustomer }: LandingViewProps) {
                 disabled={code.trim().length < 4}
                 onClick={() => onCustomer(code.trim())}
               >
-                Connect to Technician
+                <Download className="w-4 h-4 mr-2" />
+                Get the helper app
                 <ArrowRight className="w-4 h-4 ml-2" />
               </Button>
             </CardContent>
@@ -133,17 +135,17 @@ export function LandingView({ onTechnician, onCustomer }: LandingViewProps) {
             {
               icon: MousePointer2,
               title: 'Full remote control',
-              desc: 'With the downloadable helper app, your technician can move your mouse and type — just like sitting next to you.',
+              desc: 'Your technician can move your mouse and type on your keyboard — just like sitting next to you.',
             },
             {
-              icon: Eye,
-              title: 'Or browser-only view',
-              desc: 'Prefer not to download anything? Join in your browser for view-only support. Your choice.',
+              icon: Download,
+              title: 'Simple one-time setup',
+              desc: 'Download a small helper app, run it with your code, and you\'re connected. Nothing is installed permanently.',
             },
             {
               icon: ShieldCheck,
               title: 'Safe & temporary',
-              desc: 'The helper app runs only while your session is active. Close it and the technician is gone — nothing installed.',
+              desc: 'The helper app runs only while your session is active. Close it and the technician is gone — nothing left behind.',
             },
           ].map((f, i) => (
             <div key={i} className="text-center p-4">
@@ -165,21 +167,21 @@ export function LandingView({ onTechnician, onCustomer }: LandingViewProps) {
                 1
               </div>
               <h4 className="font-semibold text-slate-900 mb-1">Technician starts a session</h4>
-              <p className="text-sm text-slate-600">They get a 6-character code and a join link to send you.</p>
+              <p className="text-sm text-slate-600">They get a 6-character code and send it to you by phone, email, or text.</p>
             </div>
             <div className="text-center">
               <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center mx-auto mb-3 font-bold">
                 2
               </div>
-              <h4 className="font-semibold text-slate-900 mb-1">You enter the code</h4>
-              <p className="text-sm text-slate-600">Choose to download the helper app for full control, or just share your screen in the browser.</p>
+              <h4 className="font-semibold text-slate-900 mb-1">You enter the code here</h4>
+              <p className="text-sm text-slate-600">We&apos;ll show you the right download for your computer and exactly how to open it.</p>
             </div>
             <div className="text-center">
               <div className="w-10 h-10 rounded-full bg-emerald-600 text-white flex items-center justify-center mx-auto mb-3 font-bold">
                 3
               </div>
               <h4 className="font-semibold text-slate-900 mb-1">Help starts instantly</h4>
-              <p className="text-sm text-slate-600">Your technician sees your screen, points things out, or — with the app — fixes the problem for you.</p>
+              <p className="text-sm text-slate-600">Your technician sees your screen and can fix the problem for you. Close the app any time to end.</p>
             </div>
           </div>
         </div>

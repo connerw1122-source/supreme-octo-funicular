@@ -45,13 +45,11 @@ import { toast } from 'sonner'
 import { useSession, type ChatMessage, type Peer, type FileMeta } from '@/lib/use-session'
 
 interface SessionViewProps {
-  role: 'technician' | 'customer'
+  // Technician-only — customers use the native desktop app, not the browser.
   roomCode: string
   displayName: string
   sessionTitle: string
   sessionId: string
-  // Customer must pass their local screen-share stream
-  localStream?: MediaStream | null
   onExit: () => void
   onEnded?: () => void
 }
@@ -72,12 +70,10 @@ interface IncomingFile {
 }
 
 export function SessionView({
-  role,
   roomCode,
   displayName,
   sessionTitle,
   sessionId,
-  localStream,
   onExit,
   onEnded,
 }: SessionViewProps) {
@@ -96,7 +92,6 @@ export function SessionView({
   const [lastInputSent, setLastInputSent] = useState<number>(0)
 
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
-  const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -106,13 +101,12 @@ export function SessionView({
   const pressedKeysRef = useRef<Set<string>>(new Set())
 
   // -------------------------------------------------------------------------
-  // Session hook
+  // Session hook (technician only — customers use the native desktop app)
   // -------------------------------------------------------------------------
   const session = useSession({
     roomCode,
-    role,
+    role: 'technician',
     name: displayName,
-    localStream: role === 'customer' ? localStream : undefined,
     onRemoteStream: (stream) => {
       console.log('[session] remote stream arrived')
       setRemoteStream(stream)
@@ -182,21 +176,6 @@ export function SessionView({
       remoteVideoRef.current.srcObject = remoteStream
     }
   }, [remoteStream])
-
-  useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream
-    }
-  }, [localStream])
-
-  // Customer signals stream ready once the local stream is set
-  useEffect(() => {
-    if (role === 'customer' && localStream && session.connected) {
-      // Give the technician a moment to receive the joined-room event
-      const t = setTimeout(() => session.signalStreamReady(), 500)
-      return () => clearTimeout(t)
-    }
-  }, [role, localStream, session.connected, session])
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -292,15 +271,13 @@ export function SessionView({
     try {
       await fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' })
     } catch {}
-    // Stop local tracks
-    localStream?.getTracks().forEach((t) => t.stop())
     onExit()
   }
 
   // -------------------------------------------------------------------------
-  // Remote control handlers (technician only)
+  // Remote control handlers (technician only — this view is always technician)
   // -------------------------------------------------------------------------
-  const isTechnician = role === 'technician'
+  const isTechnician = true
 
   // Convert a mouse event on the stage to relative [0..1] coordinates
   // accounting for the video's "object-contain" letterboxing.
@@ -443,9 +420,8 @@ export function SessionView({
   // -------------------------------------------------------------------------
   const iceConnected = session.iceState === 'connected' || session.iceState === 'completed'
   const peer = peers[0]
-  const otherRole = isTechnician ? 'customer' : 'technician'
   const dcOpen = !!session.dc.current && session.dc.current.readyState === 'open'
-  const controlAvailable = isTechnician && iceConnected && dcOpen
+  const controlAvailable = iceConnected && dcOpen
 
   return (
     <div className="h-screen flex flex-col bg-slate-900 text-slate-100">
@@ -462,13 +438,9 @@ export function SessionView({
               <h1 className="font-semibold text-white">{sessionTitle}</h1>
               <Badge
                 variant="outline"
-                className={
-                  isTechnician
-                    ? 'bg-emerald-950/50 text-emerald-400 border-emerald-800'
-                    : 'bg-amber-950/50 text-amber-400 border-amber-800'
-                }
+                className="bg-emerald-950/50 text-emerald-400 border-emerald-800"
               >
-                {isTechnician ? 'TECHNICIAN' : 'CUSTOMER'}
+                TECHNICIAN
               </Badge>
             </div>
             <p className="text-xs text-slate-400">
@@ -477,7 +449,7 @@ export function SessionView({
                 {roomCode}
               </button>
               {copiedCode && <Check className="inline w-3 h-3 ml-1 text-emerald-400" />}
-              {peer && <span className="ml-2">· Connected to {peer.name} ({otherRole})</span>}
+              {peer && <span className="ml-2">· Connected to {peer.name} (customer)</span>}
             </p>
           </div>
         </div>
@@ -544,36 +516,20 @@ export function SessionView({
             onContextMenu={handleControlContext}
             tabIndex={controlMode ? 0 : -1}
           >
-            {isTechnician ? (
-              remoteStream ? (
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <WaitingForCustomer
-                  code={roomCode}
-                  connected={session.connected}
-                  peerPresent={!!peer}
-                />
-              )
+            {remoteStream ? (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full h-full object-contain"
+              />
             ) : (
-              // Customer: show their own preview
-              <>
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-contain"
-                />
-                <div className="absolute top-3 left-3 bg-black/60 text-white text-xs px-2 py-1 rounded">
-                  You are sharing your screen
-                </div>
-              </>
+              <WaitingForCustomer
+                code={roomCode}
+                connected={session.connected}
+                peerPresent={!!peer}
+              />
             )}
 
             {/* Remote control overlay - dims the edges when active */}
@@ -751,11 +707,9 @@ export function SessionView({
               )}
             </div>
             <div>
-              {isTechnician
-                ? controlMode
-                  ? 'Controlling the customer\'s screen. Click the Remote Control switch again to stop.'
-                  : 'Viewing the customer\'s screen. Turn on Remote Control to take over — requires the customer app.'
-                : 'Your screen is being shared. You can chat with your technician at any time.'}
+              {controlMode
+                ? 'Controlling the customer\'s screen. Click the Remote Control switch again to stop.'
+                : 'Viewing the customer\'s screen. Turn on Remote Control to take over — requires the customer app.'}
             </div>
           </div>
         </div>
@@ -783,7 +737,7 @@ export function SessionView({
                       <MessageSquare className="w-6 h-6 mx-auto mb-2 opacity-40" />
                       No messages yet.
                       <br />
-                      Say hello to {peer?.name ?? (isTechnician ? 'the customer' : 'your technician')}!
+                      Say hello to {peer?.name ?? 'the customer'}!
                     </div>
                   ) : (
                     chatMessages.map((m) => {
@@ -871,8 +825,7 @@ export function SessionView({
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-slate-100 truncate">{f.meta.name}</p>
                             <p className="text-xs text-slate-400">
-                              {(f.meta.size / 1024).toFixed(1)} KB · from{' '}
-                              {isTechnician ? 'customer' : 'technician'}
+                              {(f.meta.size / 1024).toFixed(1)} KB · from customer
                             </p>
                           </div>
                           {f.done && (
@@ -898,7 +851,7 @@ export function SessionView({
               <div className="flex items-center gap-2 text-sm">
                 <div className={`w-2 h-2 rounded-full ${session.connected ? 'bg-emerald-400' : 'bg-slate-600'}`} />
                 <span className="text-slate-200">{displayName}</span>
-                <span className="text-slate-500 text-xs">(you · {role})</span>
+                <span className="text-slate-500 text-xs">(you · technician)</span>
               </div>
               {peers.map((p) => (
                 <div key={p.id} className="flex items-center gap-2 text-sm">
@@ -924,17 +877,16 @@ function WaitingForCustomer({
   connected: boolean
   peerPresent: boolean
 }) {
-  const [copied, setCopied] = useState<'link' | 'app' | null>(null)
+  const [copied, setCopied] = useState<'link' | 'code' | null>(null)
   const copyLink = () => {
     const url = `${window.location.origin}/#join/${code}`
     navigator.clipboard.writeText(url)
     setCopied('link')
     setTimeout(() => setCopied(null), 2000)
   }
-  const copyAppLink = () => {
-    const url = `${window.location.origin}/downloads/`
-    navigator.clipboard.writeText(url)
-    setCopied('app')
+  const copyCode = () => {
+    navigator.clipboard.writeText(code)
+    setCopied('code')
     setTimeout(() => setCopied(null), 2000)
   }
 
@@ -952,39 +904,36 @@ function WaitingForCustomer({
       </h2>
       <p className="text-slate-400 mb-6 max-w-md mx-auto">
         {peerPresent
-          ? 'The customer has joined. Establishing a secure WebRTC connection — this usually takes a few seconds.'
-          : 'Share the link or code below with your customer. For full remote control, ask them to download the customer app.'}
+          ? 'The customer is starting the helper app. Establishing a secure WebRTC connection — this usually takes a few seconds.'
+          : 'Send your customer the link below. They\'ll download the helper app and run it with this code — you\'ll see and control their screen as soon as they connect.'}
       </p>
       {!peerPresent && (
-        <div className="grid sm:grid-cols-2 gap-3 max-w-xl mx-auto">
-          {/* Join link card */}
-          <div className="bg-slate-800 rounded-lg p-4 text-left">
-            <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Browser join (view-only)</p>
-            <p className="font-mono text-2xl font-bold text-emerald-400 tracking-wider mb-3">{code}</p>
-            <Button onClick={copyLink} variant="outline" size="sm" className="border-slate-700 text-slate-200 hover:bg-slate-700 w-full">
-              {copied === 'link' ? <Check className="w-3.5 h-3.5 mr-1.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
-              {copied === 'link' ? 'Copied!' : 'Copy join link'}
-            </Button>
-            <p className="text-[10px] text-slate-500 mt-2">
-              Customer opens this in their browser. No download needed, but you can only view, not control.
+        <div className="space-y-3 max-w-md mx-auto">
+          {/* Primary CTA: send the join link */}
+          <div className="bg-slate-800 rounded-lg p-4 text-left border border-emerald-700/40">
+            <p className="text-[10px] text-emerald-400 uppercase tracking-wide mb-1">Send this to your customer</p>
+            <p className="text-sm font-semibold text-white mb-1">Customer join link</p>
+            <p className="text-[11px] text-slate-400 mb-3">
+              They open this link in their browser, download the helper app for their computer, and run it. The app will ask for the code below.
             </p>
+            <Button onClick={copyLink} size="sm" className="bg-emerald-600 hover:bg-emerald-700 w-full">
+              {copied === 'link' ? <Check className="w-3.5 h-3.5 mr-1.5" /> : <Copy className="w-3.5 h-3.5 mr-1.5" />}
+              {copied === 'link' ? 'Copied!' : 'Copy customer join link'}
+            </Button>
           </div>
 
-          {/* App download card */}
-          <div className="bg-slate-800 rounded-lg p-4 text-left border border-emerald-700/40">
-            <p className="text-[10px] text-emerald-400 uppercase tracking-wide mb-1">Customer app (full control)</p>
-            <p className="text-sm font-semibold text-white mb-1">RemoteHelp Desktop Client</p>
-            <p className="text-[11px] text-slate-400 mb-3">
-              For Windows · Mac · Linux. Customer runs it once — no permanent install.
+          {/* Code box */}
+          <button
+            onClick={copyCode}
+            className="w-full bg-slate-800 hover:bg-slate-700 transition-colors rounded-lg p-4 text-left"
+          >
+            <p className="text-[10px] text-slate-400 uppercase tracking-wide mb-1">Session code (in case they need it)</p>
+            <p className="font-mono text-3xl font-bold text-emerald-400 tracking-wider flex items-center gap-2">
+              {code}
+              {copied === 'code' && <Check className="w-5 h-5 text-emerald-300" />}
             </p>
-            <Button onClick={copyAppLink} size="sm" className="bg-emerald-600 hover:bg-emerald-700 w-full">
-              {copied === 'app' ? <Check className="w-3.5 h-3.5 mr-1.5" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
-              {copied === 'app' ? 'Copied!' : 'Copy app download link'}
-            </Button>
-            <p className="text-[10px] text-slate-500 mt-2">
-              Send this link with the session code. Once they run it, you can move their mouse and type.
-            </p>
-          </div>
+            <p className="text-[10px] text-slate-500 mt-1">Click to copy</p>
+          </button>
         </div>
       )}
       <p className="text-xs text-slate-500 mt-6">

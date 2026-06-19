@@ -201,11 +201,11 @@ export function TechnicianDashboard({
                   <MousePointer2 className="w-5 h-5" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="font-semibold text-slate-900">Customer app for full remote control</h3>
+                  <h3 className="font-semibold text-slate-900">Customer helper app</h3>
                   <p className="text-sm text-slate-600 mt-0.5">
-                    For customers who need you to actually drive their mouse and keyboard, send them
-                    one of these links along with their session code. The browser join path stays
-                    available for view-only support.
+                    When a customer joins a session, they&apos;ll be prompted to download this app
+                    with browser-specific instructions. You can also download it directly here to
+                    share via USB or local network if your customer can&apos;t reach this server.
                   </p>
                 </div>
               </div>
