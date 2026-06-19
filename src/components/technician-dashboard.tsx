@@ -630,18 +630,20 @@ export function TechnicianDashboard({
                 <ol className="space-y-2 text-sm text-slate-700">
                   <li className="flex gap-2">
                     <span className="font-bold text-[#1B3A6B]">1.</span>
-                    <span>Download the installer (Windows or Mac/Linux) from this MarqueeIT server.</span>
+                    <span>Download the MarqueeIT client binary (Windows, Mac, or Linux) from the customer download page or via the links below.</span>
                   </li>
                   <li className="flex gap-2">
                     <span className="font-bold text-[#1B3A6B]">2.</span>
-                    <span>Open a terminal / command prompt and run the installer with the <code className="bg-slate-200 px-1 rounded text-xs">--unattended</code> flag and this code:</span>
+                    <span>Open a terminal / command prompt and run the client with the <code className="bg-slate-200 px-1 rounded text-xs">--unattended</code> flag and this code:</span>
                   </li>
                 </ol>
                 <div className="mt-2 bg-slate-900 text-slate-100 rounded p-2 font-mono text-xs overflow-x-auto">
-                  <div className="text-slate-400"># Windows</div>
-                  <div>install_windows.bat --unattended {setupMachine.machineCode}</div>
-                  <div className="text-slate-400 mt-2"># Mac / Linux</div>
-                  <div>./install_mac_linux.sh --unattended {setupMachine.machineCode}</div>
+                  <div className="text-slate-400"># Windows (run in Command Prompt)</div>
+                  <div>marqueeit-client-windows.exe --unattended {setupMachine.machineCode}</div>
+                  <div className="text-slate-400 mt-2"># Mac (in Terminal)</div>
+                  <div>./marqueeit-client-mac --unattended {setupMachine.machineCode}</div>
+                  <div className="text-slate-400 mt-2"># Linux (in Terminal)</div>
+                  <div>./marqueeit-client-linux --unattended {setupMachine.machineCode}</div>
                 </div>
                 <ol className="space-y-2 text-sm text-slate-700 mt-3">
                   <li className="flex gap-2">

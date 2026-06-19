@@ -61,7 +61,7 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
   const [errorMsg, setErrorMsg] = useState<string>('')
   const [loadingSession, setLoadingSession] = useState(true)
   const [copied, setCopied] = useState(false)
-  const [downloadStarted, setDownloadStarted] = useState<'windows' | 'mac' | null>(null)
+  const [downloadStarted, setDownloadStarted] = useState<'windows' | 'mac' | 'linux' | null>(null)
 
   const browser = useMemo(detectBrowser, [])
   const os = useMemo(detectOS, [])
@@ -98,12 +98,21 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const startDownload = (which: 'windows' | 'mac') => {
+  const startDownload = (which: 'windows' | 'mac' | 'linux') => {
     setDownloadStarted(which)
-    const url = which === 'windows' ? '/downloads/install_windows.bat' : '/downloads/install_mac_linux.sh'
+    const urls = {
+      windows: '/downloads/marqueeit-client-windows.exe',
+      mac: '/downloads/marqueeit-client-mac',
+      linux: '/downloads/marqueeit-client-linux',
+    }
+    const names = {
+      windows: 'marqueeit-client-windows.exe',
+      mac: 'marqueeit-client-mac',
+      linux: 'marqueeit-client-linux',
+    }
     const a = document.createElement('a')
-    a.href = url
-    a.download = which === 'windows' ? 'install_windows.bat' : 'install_mac_linux.sh'
+    a.href = urls[which]
+    a.download = names[which]
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -211,18 +220,18 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
                   <h4 className="font-semibold text-slate-900">Pick your computer type</h4>
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-3">
+                <div className="grid sm:grid-cols-3 gap-3">
                   <button
                     onClick={() => startDownload('windows')}
-                    className={`flex items-center gap-3 p-4 rounded-lg bg-white border-2 transition-all text-left ${
+                    className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
                       downloadStarted === 'windows'
                         ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
                         : 'border-slate-200 hover:border-[#1B3A6B] hover:bg-[#1B3A6B]/5'
                     } ${os === 'windows' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
                   >
-                    <MonitorIcon className="w-7 h-7 text-slate-700" />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
+                    <MonitorIcon className="w-8 h-8 text-slate-700" />
+                    <div>
+                      <div className="flex items-center justify-center gap-2">
                         <p className="font-semibold text-slate-900">Windows</p>
                         {os === 'windows' && (
                           <span className="px-1.5 py-0.5 bg-[#FFC425] text-[#1B3A6B] text-[9px] font-bold rounded uppercase">Yours</span>
@@ -235,21 +244,42 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
 
                   <button
                     onClick={() => startDownload('mac')}
-                    className={`flex items-center gap-3 p-4 rounded-lg bg-white border-2 transition-all text-left ${
+                    className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
                       downloadStarted === 'mac'
                         ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
                         : 'border-slate-200 hover:border-[#1B3A6B] hover:bg-[#1B3A6B]/5'
-                    } ${os === 'mac' || os === 'linux' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
+                    } ${os === 'mac' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
                   >
-                    <Apple className="w-7 h-7 text-slate-700" />
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <p className="font-semibold text-slate-900">Mac / Linux</p>
-                        {(os === 'mac' || os === 'linux') && (
+                    <Apple className="w-8 h-8 text-slate-700" />
+                    <div>
+                      <div className="flex items-center justify-center gap-2">
+                        <p className="font-semibold text-slate-900">Mac</p>
+                        {os === 'mac' && (
                           <span className="px-1.5 py-0.5 bg-[#FFC425] text-[#1B3A6B] text-[9px] font-bold rounded uppercase">Yours</span>
                         )}
                       </div>
-                      <p className="text-xs text-slate-500">macOS 11+ or any Linux</p>
+                      <p className="text-xs text-slate-500">macOS 11+</p>
+                    </div>
+                    <Download className="w-4 h-4 text-slate-400" />
+                  </button>
+
+                  <button
+                    onClick={() => startDownload('linux')}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
+                      downloadStarted === 'linux'
+                        ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
+                        : 'border-slate-200 hover:border-[#1B3A6B] hover:bg-[#1B3A6B]/5'
+                    } ${os === 'linux' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
+                  >
+                    <MonitorIcon className="w-8 h-8 text-slate-700" />
+                    <div>
+                      <div className="flex items-center justify-center gap-2">
+                        <p className="font-semibold text-slate-900">Linux</p>
+                        {os === 'linux' && (
+                          <span className="px-1.5 py-0.5 bg-[#FFC425] text-[#1B3A6B] text-[9px] font-bold rounded uppercase">Yours</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500">Any Linux</p>
                     </div>
                     <Download className="w-4 h-4 text-slate-400" />
                   </button>
@@ -422,7 +452,7 @@ function SafariInstructions() {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Find <strong>install_mac_linux.sh</strong>, click the magnifying glass to open in Finder.</span>
+        <span>Find <strong>marqueeit-client-mac</strong>, click the magnifying glass to open in Finder.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
@@ -445,7 +475,7 @@ function GenericInstructions({ os }: { os: OS }) {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Or open your Downloads folder and double-click {os === 'windows' ? 'install_windows.bat' : 'install_mac_linux.sh'}.</span>
+        <span>Or open your Downloads folder and double-click {os === 'windows' ? 'marqueeit-client-windows.exe' : os === 'mac' ? 'marqueeit-client-mac' : 'marqueeit-client-linux'}.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>

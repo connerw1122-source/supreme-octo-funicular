@@ -1,239 +1,172 @@
-import { createServer } from 'http'
-import { Server, Socket } from 'socket.io'
-
-const httpServer = createServer()
-const io = new Server(httpServer, {
-  // DO NOT change the path - Caddy uses it for routing
-  path: '/',
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-  },
-  pingTimeout: 60000,
-  pingInterval: 25000,
-  maxHttpBufferSize: 5 * 1024 * 1024, // 5MB for file chunks
-})
-
-// ---------------------------------------------------------------------------
-// Room model
-// ---------------------------------------------------------------------------
-// A "room" is identified by the session code (e.g. "ABC123").
-// Two roles can join a room:
-//   - "technician" : the IT support agent viewing the customer's screen
-//   - "customer"   : the client sharing their screen
-// All WebRTC signaling (offer / answer / ICE) is relayed peer-to-peer inside
-// the room. Data-channel messages (chat, file transfer, annotations) are
-// also relayed through here as a fallback / out-of-band channel.
-
-type Role = 'technician' | 'customer'
-
-interface Peer {
-  socket: Socket
-  role: Role
+interface WsData {
+  role: 'technician' | 'customer'
   name: string
   roomCode: string
+  peerId: string
   joinedAt: number
 }
 
-const rooms = new Map<string, Map<string, Peer>>() // roomCode -> socketId -> Peer
+const peersByRoom = new Map<string, Map<string, any>>()
 
 function getRoom(code: string) {
-  if (!rooms.has(code)) rooms.set(code, new Map())
-  return rooms.get(code)!
+  if (!peersByRoom.has(code)) peersByRoom.set(code, new Map())
+  return peersByRoom.get(code)!
 }
 
-function listPeers(code: string) {
-  return Array.from(getRoom(code).values()).map((p) => ({
-    id: p.socket.id,
-    role: p.role,
-    name: p.name,
-    joinedAt: p.joinedAt,
-  }))
+function listRoomPeers(code: string, excludeId?: string) {
+  return Array.from(getRoom(code).entries())
+    .filter(([id]) => id !== excludeId)
+    .map(([id, ws]) => {
+      const d = ws.data as WsData
+      return { id, role: d.role, name: d.name, joinedAt: d.joinedAt }
+    })
 }
 
 function broadcastPresence(code: string) {
-  io.to(code).emit('presence', { peers: listPeers(code) })
+  const peers = listRoomPeers(code)
+  const text = JSON.stringify({ type: 'presence', peers })
+  getRoom(code).forEach((ws) => {
+    try { if (ws.readyState === 1) ws.send(text) } catch {}
+  })
 }
 
-// ---------------------------------------------------------------------------
-// Connection lifecycle
-// ---------------------------------------------------------------------------
+function relayToRoom(code: string, message: string | Buffer, excludeId?: string) {
+  getRoom(code).forEach((ws, id) => {
+    if (id === excludeId) return
+    try { if (ws.readyState === 1) ws.send(message) } catch {}
+  })
+}
 
-io.on('connection', (socket: Socket) => {
-  console.log(`[io] connected ${socket.id}`)
-  let currentRoom: string | null = null
-  let currentRole: Role | null = null
-  let currentName: string | null = null
+function joinRoom(ws: any, roomCode: string, role: 'technician' | 'customer', name: string) {
+  const code = roomCode.toUpperCase().trim()
+  const d = ws.data as WsData
+  if (d.roomCode && d.roomCode !== code) {
+    getRoom(d.roomCode).delete(d.peerId)
+    relayToRoom(d.roomCode, JSON.stringify({ type: 'peer-left', id: d.peerId, name: d.name }))
+    broadcastPresence(d.roomCode)
+  }
+  d.roomCode = code
+  d.role = role
+  d.name = name
+  getRoom(code).set(d.peerId, ws)
+  console.log(`[ws] ${name} (${role}) joined room ${code}`)
+  const peers = listRoomPeers(code, d.peerId)
+  ws.send(JSON.stringify({ type: 'joined-room', peers }))
+  relayToRoom(code, JSON.stringify({
+    type: 'peer-joined', id: d.peerId, role, name, joinedAt: d.joinedAt,
+  }), d.peerId)
+  if (role === 'customer') {
+    relayToRoom(code, JSON.stringify({ type: 'stream-ready', from: d.peerId }), d.peerId)
+  }
+  broadcastPresence(code)
+}
 
-  socket.on('join-room', (payload: { roomCode: string; role: Role; name: string }) => {
-    const { roomCode, role, name } = payload
-    if (!roomCode || !role || !name) {
-      socket.emit('error-message', { message: 'Invalid join payload' })
-      return
+const server = Bun.serve({
+  port: 3003,
+  hostname: '0.0.0.0',
+  // Disable permessage-deflate to avoid Bun crash with browser clients
+  permessageDeflate: false,
+  fetch(req, srv) {
+    console.log(`[http] ${req.method} ${req.url}`)
+    try {
+      const code = (req.headers.get('x-marqueeit-code') || '').toUpperCase().trim()
+      const name = req.headers.get('x-marqueeit-name') || ''
+      const role = (req.headers.get('x-marqueeit-role') || 'customer') as 'technician' | 'customer'
+      const data: WsData = {
+        role, name, roomCode: code,
+        peerId: `peer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        joinedAt: Date.now(),
+      }
+      const ok = srv.upgrade(req, { data })
+      console.log(`[http] upgrade result: ${ok}`)
+      if (ok) return
+      return new Response('hi')
+    } catch (err) {
+      console.error('[http] error:', err)
+      return new Response('error', { status: 500 })
     }
-
-    // Leave any prior room
-    if (currentRoom) {
-      socket.leave(currentRoom)
-      const prevRoom = getRoom(currentRoom)
-      prevRoom.delete(socket.id)
-      broadcastPresence(currentRoom)
-      io.to(currentRoom).emit('peer-left', { id: socket.id, name: currentName ?? '' })
-    }
-
-    currentRoom = roomCode.toUpperCase()
-    currentRole = role
-    currentName = name
-
-    socket.join(currentRoom)
-    const room = getRoom(currentRoom)
-    room.set(socket.id, {
-      socket,
-      role,
-      name,
-      roomCode: currentRoom,
-      joinedAt: Date.now(),
-    })
-
-    console.log(`[io] ${name} (${role}) joined room ${currentRoom}`)
-
-    // Tell the joiner who's already there
-    socket.emit('joined-room', { peers: listPeers(currentRoom).filter((p) => p.id !== socket.id) })
-
-    // Tell everyone else
-    socket.to(currentRoom).emit('peer-joined', {
-      id: socket.id,
-      role,
-      name,
-      joinedAt: Date.now(),
-    })
-
-    broadcastPresence(currentRoom)
-  })
-
-  // -------------------------------------------------------------------------
-  // WebRTC signaling relay
-  // -------------------------------------------------------------------------
-
-  socket.on('webrtc-offer', (payload: { to: string; sdp: RTCSessionDescriptionInit }) => {
-    io.to(payload.to).emit('webrtc-offer', { from: socket.id, sdp: payload.sdp })
-  })
-
-  socket.on('webrtc-answer', (payload: { to: string; sdp: RTCSessionDescriptionInit }) => {
-    io.to(payload.to).emit('webrtc-answer', { from: socket.id, sdp: payload.sdp })
-  })
-
-  socket.on('webrtc-ice', (payload: { to: string; candidate: RTCIceCandidateInit }) => {
-    io.to(payload.to).emit('webrtc-ice', { from: socket.id, candidate: payload.candidate })
-  })
-
-  // Customer tells the technician that the screen-share stream is ready,
-  // so the technician can initiate the offer.
-  socket.on('stream-ready', (payload: { to?: string }) => {
-    if (!currentRoom) return
-    if (payload.to) {
-      io.to(payload.to).emit('stream-ready', { from: socket.id })
-    } else {
-      socket.to(currentRoom).emit('stream-ready', { from: socket.id })
-    }
-  })
-
-  // -------------------------------------------------------------------------
-  // Out-of-band data-channel fallback (chat / annotations / file metadata)
-  // -------------------------------------------------------------------------
-
-  socket.on('chat-message', (payload: { content: string; sender: string }) => {
-    if (!currentRoom) return
-    io.to(currentRoom).emit('chat-message', {
-      id: Math.random().toString(36).slice(2, 10),
-      sender: payload.sender,
-      content: payload.content,
-      timestamp: new Date().toISOString(),
-    })
-  })
-
-  socket.on('annotation', (payload: { x: number; y: number; label?: string }) => {
-    if (!currentRoom) return
-    socket.to(currentRoom).emit('annotation', { from: socket.id, ...payload })
-  })
-
-  socket.on('clear-annotations', () => {
-    if (!currentRoom) return
-    socket.to(currentRoom).emit('clear-annotations')
-  })
-
-  // File transfer metadata - actual bytes flow over the WebRTC data channel,
-  // but we broadcast the "I'm sending you a file" notice so the recipient UI
-  // can prepare a progress entry.
-  socket.on('file-meta', (payload: { to: string; fileId: string; name: string; size: number; mime: string }) => {
-    io.to(payload.to).emit('file-meta', {
-      from: socket.id,
-      fileId: payload.fileId,
-      name: payload.name,
-      size: payload.size,
-      mime: payload.mime,
-    })
-  })
-
-  socket.on('file-complete', (payload: { to: string; fileId: string }) => {
-    io.to(payload.to).emit('file-complete', { from: socket.id, fileId: payload.fileId })
-  })
-
-  // -------------------------------------------------------------------------
-  // Session control events
-  // -------------------------------------------------------------------------
-
-  socket.on('request-control', () => {
-    if (!currentRoom) return
-    socket.to(currentRoom).emit('request-control', { from: socket.id })
-  })
-
-  socket.on('end-session', () => {
-    if (!currentRoom) return
-    io.to(currentRoom).emit('session-ended', { by: socket.id })
-  })
-
-  // -------------------------------------------------------------------------
-  // Disconnect
-  // -------------------------------------------------------------------------
-
-  socket.on('leave-room', () => {
-    if (!currentRoom) return
-    socket.leave(currentRoom)
-    const room = getRoom(currentRoom)
-    room.delete(socket.id)
-    broadcastPresence(currentRoom)
-    io.to(currentRoom).emit('peer-left', { id: socket.id, name: currentName ?? '' })
-    currentRoom = null
-    currentRole = null
-    currentName = null
-  })
-
-  socket.on('disconnect', () => {
-    console.log(`[io] disconnected ${socket.id}`)
-    if (currentRoom) {
-      const room = getRoom(currentRoom)
-      room.delete(socket.id)
-      broadcastPresence(currentRoom)
-      io.to(currentRoom).emit('peer-left', { id: socket.id, name: currentName ?? '' })
-    }
-  })
-
-  socket.on('error', (err) => {
-    console.error(`[io] socket error ${socket.id}:`, err)
-  })
+  },
+  websocket: {
+    open(ws) {
+      console.log('[ws] open')
+      try {
+        const d = ws.data as WsData
+        if (d.roomCode) {
+          joinRoom(ws, d.roomCode, d.role, d.name || 'Customer')
+        }
+      } catch (err) {
+        console.error('[ws] open error:', err)
+      }
+    },
+    message(ws, msg) {
+      try {
+        const d = ws.data as WsData
+        if (typeof msg === 'string') {
+          const m = JSON.parse(msg)
+          if (m.type === 'join-room' && m.roomCode) {
+            joinRoom(ws, m.roomCode, m.role || 'customer', m.name || 'Peer')
+            return
+          }
+          if (m.type === 'chat' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({
+              type: 'chat-message', id: Math.random().toString(36).slice(2),
+              sender: m.sender || d.name, content: m.content,
+              timestamp: new Date().toISOString(),
+            }), d.peerId)
+            return
+          }
+          if (m.type === 'input-event' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({
+              type: 'input-event', payload: m.payload || m,
+            }), d.peerId)
+            return
+          }
+          if (m.type === 'annotation' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({ type: 'annotation', ...m }), d.peerId)
+            return
+          }
+          if (m.type === 'clear-annotations' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({ type: 'clear-annotations' }), d.peerId)
+            return
+          }
+          if (m.type === 'end-session' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({ type: 'session-ended' }), d.peerId)
+            return
+          }
+          if (m.type === 'stream-ready' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({ type: 'stream-ready', from: d.peerId }), d.peerId)
+            return
+          }
+        } else {
+          // Binary = screen frame. Convert to Uint8Array for safe forwarding.
+          if (d.roomCode) {
+            const u8 = new Uint8Array(msg as ArrayBuffer)
+            relayToRoom(d.roomCode, u8, d.peerId)
+          }
+        }
+      } catch (err) {
+        console.error('[ws] message error:', err)
+      }
+    },
+    close(ws) {
+      try {
+        const d = ws.data as WsData
+        if (d.roomCode) {
+          getRoom(d.roomCode).delete(d.peerId)
+          relayToRoom(d.roomCode, JSON.stringify({ type: 'peer-left', id: d.peerId, name: d.name }))
+          broadcastPresence(d.roomCode)
+          console.log(`[ws] ${d.name} left room ${d.roomCode}`)
+        }
+      } catch (err) {
+        console.error('[ws] close error:', err)
+      }
+    },
+    error(ws, error) {
+      console.error('[ws] socket error:', error)
+    },
+  },
 })
 
-const PORT = 3003
-httpServer.listen(PORT, '0.0.0.0', () => {
-  console.log(`Signaling server running on port ${PORT}`)
-})
-
-process.on('SIGTERM', () => {
-  console.log('SIGTERM, shutting down...')
-  httpServer.close(() => process.exit(0))
-})
-process.on('SIGINT', () => {
-  console.log('SIGINT, shutting down...')
-  httpServer.close(() => process.exit(0))
-})
+console.log(`Signaling server on port 3003`)
+process.on('SIGTERM', () => { server.stop(); process.exit(0) })
+process.on('SIGINT', () => { server.stop(); process.exit(0) })
