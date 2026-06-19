@@ -442,8 +442,11 @@ func main() {
                 fmt.Scanln(&code)
         }
         if name == "" {
-                fmt.Print("Enter your name: ")
-                fmt.Scanln(&name)
+                // Default to hostname. Customers don't need to type their name —
+                // the launcher passes it via --name if they entered it on the
+                // landing page. If they skipped the name field, we just use
+                // the machine's hostname so the technician has something to call them.
+                name = hostname()
         }
         if len(code) < 4 {
                 fmt.Fprintln(os.Stderr, "Invalid code")

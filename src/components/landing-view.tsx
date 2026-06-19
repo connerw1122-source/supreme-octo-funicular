@@ -4,15 +4,23 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { ArrowRight, Lock, ShieldCheck } from 'lucide-react'
+import { Label } from '@/components/ui/label'
+import { ArrowRight, Lock, ShieldCheck, User } from 'lucide-react'
 
 interface LandingViewProps {
-  onCustomer: (code: string) => void
+  onCustomer: (code: string, name: string) => void
   onTechnicianLogin: () => void
 }
 
 export function LandingView({ onCustomer, onTechnicianLogin }: LandingViewProps) {
   const [code, setCode] = useState('')
+  const [name, setName] = useState('')
+
+  const handleContinue = () => {
+    if (code.trim().length >= 4) {
+      onCustomer(code.trim(), name.trim())
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -44,22 +52,50 @@ export function LandingView({ onCustomer, onTechnicianLogin }: LandingViewProps)
           </div>
 
           <Card className="border-slate-200 shadow-sm">
-            <CardContent className="p-6">
-              <Input
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase())}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && code.trim().length >= 4) onCustomer(code.trim())
-                }}
-                placeholder="ABC123"
-                className="text-2xl tracking-[0.4em] font-mono uppercase text-center h-16 border-2 focus:border-[#1B3A6B]"
-                maxLength={8}
-                autoFocus
-              />
+            <CardContent className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="code" className="text-sm font-medium">
+                  Support code <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleContinue()
+                  }}
+                  placeholder="ABC123"
+                  className="text-2xl tracking-[0.4em] font-mono uppercase text-center h-16 border-2 focus:border-[#1B3A6B]"
+                  maxLength={8}
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="name" className="text-sm font-medium flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-slate-400" />
+                  Your name <span className="text-slate-400 font-normal">(optional)</span>
+                </Label>
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleContinue()
+                  }}
+                  placeholder="e.g. Margaret"
+                  className="h-11 border-slate-200 focus:border-[#1B3A6B]"
+                  maxLength={50}
+                />
+                <p className="text-xs text-slate-500">
+                  Helps your technician know who they&apos;re helping. You can skip this.
+                </p>
+              </div>
+
               <Button
-                className="w-full mt-4 h-12 text-base bg-[#1B3A6B] hover:bg-[#0F2A52]"
+                className="w-full h-12 text-base bg-[#1B3A6B] hover:bg-[#0F2A52]"
                 disabled={code.trim().length < 4}
-                onClick={() => onCustomer(code.trim())}
+                onClick={handleContinue}
               >
                 Continue
                 <ArrowRight className="w-4 h-4 ml-2" />

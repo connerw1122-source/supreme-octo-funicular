@@ -13,7 +13,7 @@ type View =
   | { name: 'landing' }
   | { name: 'login' }
   | { name: 'technician'; technicianName: string }
-  | { name: 'customer-download'; code: string }
+  | { name: 'customer-download'; code: string; customerName: string }
   | {
       name: 'session'
       roomCode: string
@@ -26,11 +26,13 @@ type View =
 // (from a previous login), boot straight into the technician dashboard.
 function getInitialView(): View {
   if (typeof window === 'undefined') return { name: 'landing' }
-  // Hash takes priority: #join/CODE
+  // Hash takes priority: #join/CODE or #join/CODE/NAME
   const hash = window.location.hash
-  const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)/)
+  const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
   if (joinMatch) {
-    return { name: 'customer-download', code: joinMatch[1].toUpperCase() }
+    const code = joinMatch[1].toUpperCase()
+    const customerName = joinMatch[2] ? decodeURIComponent(joinMatch[2]) : ''
+    return { name: 'customer-download', code, customerName }
   }
   const session = getSession()
   if (session) {
@@ -43,15 +45,16 @@ export default function Home() {
   const [view, setView] = useState<View>(getInitialView)
 
   // ---------------------------------------------------------------------------
-  // Hash-based routing for the customer download link: #join/CODE
+  // Hash-based routing for the customer download link: #join/CODE/NAME
   // ---------------------------------------------------------------------------
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash
-      const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)/)
+      const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
       if (joinMatch) {
         const code = joinMatch[1].toUpperCase()
-        setView({ name: 'customer-download', code })
+        const customerName = joinMatch[2] ? decodeURIComponent(joinMatch[2]) : ''
+        setView({ name: 'customer-download', code, customerName })
         return
       }
     }
@@ -81,8 +84,11 @@ export default function Home() {
     setView({ name: 'landing' })
   }, [])
 
-  const handleCustomer = useCallback((code: string) => {
-    setView({ name: 'customer-download', code })
+  const handleCustomer = useCallback((code: string, name: string) => {
+    setView({ name: 'customer-download', code, customerName: name })
+    // Update hash so the link is shareable
+    const safeName = name ? '/' + encodeURIComponent(name) : ''
+    history.replaceState(null, '', `#join/${code.toUpperCase()}${safeName}`)
   }, [])
 
   const handleBackToLanding = useCallback(() => {
@@ -140,7 +146,7 @@ export default function Home() {
         />
       )}
       {view.name === 'customer-download' && (
-        <CustomerDownload code={view.code} onBack={handleBackToLanding} />
+        <CustomerDownload code={view.code} name={view.customerName} onBack={handleBackToLanding} />
       )}
       {view.name === 'session' && (
         <SessionView

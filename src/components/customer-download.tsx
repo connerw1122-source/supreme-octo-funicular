@@ -17,11 +17,14 @@ import {
   Chrome,
   Globe,
   Info,
+  User,
+  PlayCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
 interface CustomerDownloadProps {
   code: string
+  name: string
   onBack: () => void
 }
 
@@ -56,7 +59,7 @@ function detectOS(): OS {
   return 'other'
 }
 
-export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
+export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) {
   const [sessionInfo, setSessionInfo] = useState<SessionInfo | null>(null)
   const [errorMsg, setErrorMsg] = useState<string>('')
   const [loadingSession, setLoadingSession] = useState(true)
@@ -98,25 +101,23 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const startDownload = (which: 'windows' | 'mac' | 'linux') => {
-    setDownloadStarted(which)
-    const urls = {
-      windows: '/downloads/marqueeit-client-windows.exe',
-      mac: '/downloads/marqueeit-client-mac',
-      linux: '/downloads/marqueeit-client-linux',
-    }
-    const names = {
-      windows: 'marqueeit-client-windows.exe',
-      mac: 'marqueeit-client-mac',
-      linux: 'marqueeit-client-linux',
-    }
+  // Download the launcher script for the customer's platform. The launcher
+  // auto-downloads the binary and runs it with the code+name already set.
+  const downloadLauncher = (platform: 'windows' | 'mac' | 'linux') => {
+    setDownloadStarted(platform)
+    const params = new URLSearchParams({ code: code.toUpperCase() })
+    if (name) params.set('name', name)
+    const url = `/api/launcher/${platform}?${params.toString()}`
+    // Trigger download
     const a = document.createElement('a')
-    a.href = urls[which]
-    a.download = names[which]
+    a.href = url
+    a.download = platform === 'windows'
+      ? `marqueeit-start-${code.toUpperCase()}.bat`
+      : `marqueeit-start-${code.toUpperCase()}.sh`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    toast.success('Download started')
+    toast.success('Launcher downloaded — see instructions below')
   }
 
   if (loadingSession) {
@@ -184,13 +185,19 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
                       with <span className="font-semibold">{sessionInfo.technician.name}</span>
                     </p>
                   )}
+                  {name && (
+                    <p className="text-sm text-slate-600 mt-0.5 flex items-center gap-1">
+                      <User className="w-3 h-3" />
+                      <span>You: <span className="font-medium">{name}</span></span>
+                    </p>
+                  )}
                 </div>
                 <button
                   onClick={copyCode}
                   className="text-right bg-[#FFC425]/15 hover:bg-[#FFC425]/30 transition-colors rounded-lg p-2.5 border border-[#FFC425]/50"
                   title="Click to copy"
                 >
-                  <p className="text-[10px] text-slate-600 uppercase tracking-wide">Your code</p>
+                  <p className="text-[10px] text-slate-600 uppercase tracking-wide">Session code</p>
                   <p className="font-mono font-bold text-xl tracking-wider text-[#1B3A6B] flex items-center gap-1">
                     {sessionInfo.code}
                     {copied ? <Check className="w-3.5 h-3.5 text-[#1B3A6B]" /> : <Copy className="w-3 h-3 text-slate-400" />}
@@ -208,8 +215,11 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
                   <Download className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-xl font-bold text-slate-900">Download the helper app</h3>
-                  <p className="text-sm text-slate-600">Lets your technician see and control your screen.</p>
+                  <h3 className="text-xl font-bold text-slate-900">Download &amp; run</h3>
+                  <p className="text-sm text-slate-600">
+                    Click your computer type below. The launcher will download the helper app
+                    and start your session automatically — no code or name to enter.
+                  </p>
                 </div>
               </div>
 
@@ -217,12 +227,12 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">1</div>
-                  <h4 className="font-semibold text-slate-900">Pick your computer type</h4>
+                  <h4 className="font-semibold text-slate-900">Pick your computer type and click to download</h4>
                 </div>
 
                 <div className="grid sm:grid-cols-3 gap-3">
                   <button
-                    onClick={() => startDownload('windows')}
+                    onClick={() => downloadLauncher('windows')}
                     className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
                       downloadStarted === 'windows'
                         ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
@@ -243,7 +253,7 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
                   </button>
 
                   <button
-                    onClick={() => startDownload('mac')}
+                    onClick={() => downloadLauncher('mac')}
                     className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
                       downloadStarted === 'mac'
                         ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
@@ -264,7 +274,7 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
                   </button>
 
                   <button
-                    onClick={() => startDownload('linux')}
+                    onClick={() => downloadLauncher('linux')}
                     className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
                       downloadStarted === 'linux'
                         ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
@@ -284,29 +294,47 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
                     <Download className="w-4 h-4 text-slate-400" />
                   </button>
                 </div>
+
+                {downloadStarted && (
+                  <div className="mt-3 p-3 bg-[#1B3A6B]/5 border border-[#1B3A6B]/20 rounded-lg flex items-center gap-2 text-sm text-slate-700">
+                    <Check className="w-4 h-4 text-[#1B3A6B] shrink-0" />
+                    <span>
+                      Launcher downloaded! Open it (see instructions below) to start your session.
+                      Your code <strong className="font-mono">{code.toUpperCase()}</strong>
+                      {name && <> and name <strong>&ldquo;{name}&rdquo;</strong></>} are already set — you don&apos;t need to enter anything.
+                    </span>
+                  </div>
+                )}
               </div>
 
-              {/* Step 2: open the file - browser-specific instructions */}
+              {/* Step 2: open the launcher */}
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">2</div>
-                  <h4 className="font-semibold text-slate-900">Open the downloaded file</h4>
+                  <h4 className="font-semibold text-slate-900">Open the downloaded launcher</h4>
                 </div>
-                <BrowserInstructions browser={browser} os={os} />
+                <BrowserInstructions browser={browser} os={os} code={code} />
               </div>
 
-              {/* Step 3: enter the code */}
+              {/* Step 3: what happens next */}
               <div>
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">3</div>
-                  <h4 className="font-semibold text-slate-900">Type in your code when asked</h4>
+                  <h4 className="font-semibold text-slate-900">That&apos;s it! Your session starts automatically.</h4>
                 </div>
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-3">
-                  <p className="font-mono font-bold text-2xl tracking-[0.2em] text-[#1B3A6B]">{code.toUpperCase()}</p>
-                  <Button onClick={copyCode} variant="outline" size="sm" className="border-[#1B3A6B] text-[#1B3A6B] hover:bg-[#1B3A6B] hover:text-white">
-                    {copied ? <Check className="w-4 h-4 mr-1" /> : <Copy className="w-4 h-4 mr-1" />}
-                    Copy
-                  </Button>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  <div className="flex items-start gap-3">
+                    <PlayCircle className="w-5 h-5 text-[#1B3A6B] shrink-0 mt-0.5" />
+                    <div className="text-sm text-slate-700 space-y-1.5">
+                      <p>When you open the launcher:</p>
+                      <ul className="list-disc list-inside space-y-1 ml-2">
+                        <li>It downloads the MarqueeIT client (one-time, ~10 MB)</li>
+                        <li>It connects to your technician using code <span className="font-mono font-bold text-[#1B3A6B]">{code.toUpperCase()}</span></li>
+                        {name && <li>Your name <strong>&ldquo;{name}&rdquo;</strong> is sent automatically</li>}
+                        <li>A status window appears — leave it open until your technician is done</li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -314,7 +342,7 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
               <div className="mt-5 p-3 bg-[#1B3A6B]/5 border border-[#1B3A6B]/20 rounded-lg flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-[#1B3A6B] shrink-0 mt-0.5" />
                 <p className="text-xs text-slate-700">
-                  Runs only during this session. Nothing is installed permanently.
+                  Runs only during this session. Nothing is installed permanently. Close the status window any time to end the session.
                 </p>
               </div>
             </CardContent>
@@ -331,10 +359,10 @@ export function CustomerDownload({ code, onBack }: CustomerDownloadProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Browser-specific instructions
+// Browser-specific instructions for opening the launcher file
 // ---------------------------------------------------------------------------
 
-function BrowserInstructions({ browser, os }: { browser: Browser; os: OS }) {
+function BrowserInstructions({ browser, os, code }: { browser: Browser; os: OS; code: string }) {
   const browserName = {
     chrome: 'Chrome',
     edge: 'Edge',
@@ -344,6 +372,7 @@ function BrowserInstructions({ browser, os }: { browser: Browser; os: OS }) {
   }[browser]
 
   const BrowserIcon = browser === 'chrome' ? Chrome : browser === 'edge' ? Globe : Globe
+  const fileName = os === 'windows' ? `marqueeit-start-${code.toUpperCase()}.bat` : `marqueeit-start-${code.toUpperCase()}.sh`
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -354,70 +383,71 @@ function BrowserInstructions({ browser, os }: { browser: Browser; os: OS }) {
         </span>
       </div>
       <div className="p-3">
-        {browser === 'chrome' && <ChromeInstructions os={os} />}
-        {browser === 'edge' && <EdgeInstructions os={os} />}
-        {browser === 'firefox' && <FirefoxInstructions os={os} />}
-        {browser === 'safari' && <SafariInstructions />}
-        {browser === 'other' && <GenericInstructions os={os} />}
+        {browser === 'chrome' && <ChromeInstructions os={os} fileName={fileName} />}
+        {browser === 'edge' && <EdgeInstructions os={os} fileName={fileName} />}
+        {browser === 'firefox' && <FirefoxInstructions os={os} fileName={fileName} />}
+        {browser === 'safari' && <SafariInstructions fileName={fileName} />}
+        {browser === 'other' && <GenericInstructions os={os} fileName={fileName} />}
       </div>
     </div>
   )
 }
 
-function ChromeInstructions({ os }: { os: OS }) {
+function ChromeInstructions({ os, fileName }: { os: OS; fileName: string }) {
   return (
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">1.</span>
-        <span>Look at the <strong>top-right corner</strong> of this browser. Click the downloaded file box with the down arrow.</span>
+        <span>Look at the <strong>top-right corner</strong> of this browser. Click the downloaded file <code className="bg-slate-100 px-1 rounded text-xs">{fileName}</code>.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
         <span>
-          {os === 'windows' && ' If Windows shows "protected your PC", click "More info" then "Run anyway".'}
-          {os === 'mac' && ' On Mac, right-click (or Control-click) the file and choose "Open" the first time.'}
-          {!['windows', 'mac'].includes(os) && ' Click to open the file.'}
+          {os === 'windows' && <>Windows may show a blue "Windows protected your PC" message — click <strong>"More info"</strong>, then <strong>"Run anyway"</strong>.</>}
+          {os === 'mac' && <>On Mac, right-click (or Control-click) the file and choose <strong>"Open"</strong>, then confirm.</>}
+          {os === 'linux' && <>Mark the file as executable if prompted, or run <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName}</code> in a terminal.</>}
+          {!['windows', 'mac', 'linux'].includes(os) && <>Click to open the file.</>}
         </span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
-        <span>A black window opens and sets things up. When it asks for your code, type it in.</span>
+        <span>A black window (Windows) or terminal (Mac/Linux) opens. It downloads the helper app and starts your session.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>Type your first name. A "MarqueeIT Active" window appears — leave it open.</span>
+        <span>A "MarqueeIT Active" status window appears — leave it open.</span>
       </li>
     </ol>
   )
 }
 
-function EdgeInstructions({ os }: { os: OS }) {
+function EdgeInstructions({ os, fileName }: { os: OS; fileName: string }) {
   return (
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">1.</span>
-        <span>Click the <strong>download arrow</strong> (top-right, near the star).</span>
+        <span>Click the <strong>download arrow</strong> (top-right, near the star), then click <strong>Open</strong> on <code className="bg-slate-100 px-1 rounded text-xs">{fileName}</code>.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
         <span>
-          Click <strong>Open</strong> on the file.
-          {os === 'windows' && ' If Windows shows "protected your PC", click "More info" then "Run anyway".'}
+          {os === 'windows' && <>If Windows shows "protected your PC", click <strong>"More info"</strong> then <strong>"Run anyway"</strong>.</>}
+          {!['windows'].includes(os) && <>Click to open the file.</>}
         </span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
-        <span>A black window opens and sets things up. Type your code when asked.</span>
+        <span>A window opens, downloads the helper app, and starts your session.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>Type your first name. Leave the "MarqueeIT Active" window open.</span>
+        <span>Leave the "MarqueeIT Active" status window open.</span>
       </li>
     </ol>
   )
 }
 
-function FirefoxInstructions({ os }: { os: OS }) {
+function FirefoxInstructions({ os, fileName }: { os: OS; fileName: string }) {
   return (
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
@@ -426,24 +456,24 @@ function FirefoxInstructions({ os }: { os: OS }) {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Or click the <strong>blue down-arrow</strong> at top-right, then click the file name.</span>
+        <span>Or click the <strong>blue down-arrow</strong> at top-right, then click <code className="bg-slate-100 px-1 rounded text-xs">{fileName}</code>.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
         <span>
-          A black window opens and sets things up.
-          {os === 'windows' && ' If Windows shows "protected your PC", click "More info" then "Run anyway".'}
+          A window opens and downloads the helper app.
+          {os === 'windows' && <> If Windows shows "protected your PC", click "More info" then "Run anyway".</>}
         </span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>Type your code, then your first name. Leave the "MarqueeIT Active" window open.</span>
+        <span>Leave the "MarqueeIT Active" status window open.</span>
       </li>
     </ol>
   )
 }
 
-function SafariInstructions() {
+function SafariInstructions({ fileName }: { fileName: string }) {
   return (
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
@@ -452,7 +482,7 @@ function SafariInstructions() {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Find <strong>marqueeit-client-mac</strong>, click the magnifying glass to open in Finder.</span>
+        <span>Find <code className="bg-slate-100 px-1 rounded text-xs">{fileName}</code>, click the magnifying glass to open in Finder.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
@@ -460,13 +490,13 @@ function SafariInstructions() {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>A terminal opens and sets things up. Type your code, then your first name.</span>
+        <span>A terminal opens, downloads the helper app, and starts your session.</span>
       </li>
     </ol>
   )
 }
 
-function GenericInstructions({ os }: { os: OS }) {
+function GenericInstructions({ os, fileName }: { os: OS; fileName: string }) {
   return (
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
@@ -475,19 +505,19 @@ function GenericInstructions({ os }: { os: OS }) {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Or open your Downloads folder and double-click {os === 'windows' ? 'marqueeit-client-windows.exe' : os === 'mac' ? 'marqueeit-client-mac' : 'marqueeit-client-linux'}.</span>
+        <span>Or open your Downloads folder and double-click <code className="bg-slate-100 px-1 rounded text-xs">{fileName}</code>.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
         <span>
-          A window opens and sets things up.
-          {os === 'windows' && ' If Windows shows "protected your PC", click "More info" then "Run anyway".'}
-          {(os === 'mac' || os === 'linux') && ' On Mac, right-click and choose "Open" the first time.'}
+          A window opens and downloads the helper app.
+          {os === 'windows' && <> If Windows shows "protected your PC", click "More info" then "Run anyway".</>}
+          {(os === 'mac' || os === 'linux') && <> On Mac, right-click and choose "Open" the first time.</>}
         </span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>Type your code, then your first name. Leave the "MarqueeIT Active" window open.</span>
+        <span>Leave the "MarqueeIT Active" status window open.</span>
       </li>
     </ol>
   )
