@@ -97,11 +97,22 @@ export function SessionView({
   // -------------------------------------------------------------------------
   useEffect(() => {
     // Build the WebSocket URL.
-    // Always connect directly to the signaling server on port 3003.
-    // (In production, you'd put a public hostname here.)
+    // - In Docker (production): Caddy routes WS upgrades to the signaling
+    //   server based on the Connection: Upgrade header. So we connect to
+    //   the same origin as the page (ws:// or wss:// matching the page's
+    //   protocol).
+    // - In local dev (port 3000 or 81): connect directly to port 3003.
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.hostname
-    const wsUrl = `${proto}//${host}:3003/`
+    let wsUrl: string
+    const port = window.location.port
+    if (port === '3000' || port === '81' || port === '') {
+      // Production (port 80/443 via Caddy) or local dev (3000/81)
+      // Connect to the same origin — Caddy will route the WS upgrade
+      wsUrl = `${proto}//${window.location.host}/`
+    } else {
+      // Direct to signaling server on port 3003 (sandbox testing only)
+      wsUrl = `${proto}//${window.location.hostname}:3003/`
+    }
     const ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer'
     wsRef.current = ws

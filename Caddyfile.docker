@@ -1,0 +1,62 @@
+# ===========================================================================
+# MarqueeIT - Caddyfile for Docker
+# ===========================================================================
+# Single entry point. Routes traffic to either the Next.js app or the
+# signaling server based on URL path + headers.
+#
+# The {$DOMAIN} variable comes from the docker-compose env. Defaults to
+# ":80" (listen on port 80, any host) when DOMAIN is not set.
+# ===========================================================================
+
+{
+	# Disable admin API for production
+	admin off
+	# Auto-HTTPS only kicks in if DOMAIN is a real hostname (not :80)
+	auto_https {$AUTO_HTTPS:-disable}
+}
+
+{$DOMAIN} {
+	# WebSocket upgrade requests go to the signaling server.
+	# We detect them by the Connection: Upgrade + Upgrade: websocket headers
+	# OR by the XTransformPort query param (legacy, kept for backward compat).
+	@websocket {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @websocket {
+		reverse_proxy signaling:3003 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-For {remote_host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	# /api/sessions/* and /api/unattended/* go to Next.js
+	@api {
+		path /api/*
+	}
+	handle @api {
+		reverse_proxy nextjs:3000
+	}
+
+	# Static downloads (Go binaries) go to Next.js
+	@downloads {
+		path /downloads/*
+	}
+	handle @downloads {
+		reverse_proxy nextjs:3000
+	}
+
+	# Everything else (HTML, JS, CSS, etc.) goes to Next.js
+	handle {
+		reverse_proxy nextjs:3000
+	}
+
+	# Logging
+	log {
+		output stdout
+		format console
+		level INFO
+	}
+}

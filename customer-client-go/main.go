@@ -109,15 +109,26 @@ func (c *Client) Connect() error {
         }
 
         // Build WebSocket URL.
-        // If server URL is on port 81 (Caddy) or 3000 (Next.js), connect
-        // directly to port 3003 (signaling server). Caddy doesn't proxy
-        // WebSocket upgrades reliably in our setup.
+        // - If server URL is http://localhost:81 or http://localhost:3000 (local
+        //   dev), connect directly to port 3003.
+        // - If server URL is https://domain.com or http://domain.com (production
+        //   via Caddy), connect to the same origin — Caddy will route WS
+        //   upgrades to the signaling server.
         wsURL := strings.Replace(c.serverURL, "http://", "ws://", 1)
         wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
         if u, err := url.Parse(wsURL); err == nil {
                 switch u.Port() {
-                case "", "81", "3000":
+                case "", "80", "443":
+                        // Production: keep the same host/port (Caddy will route)
+                        // Just make sure the path is "/"
+                        u.Path = "/"
+                        u.RawQuery = ""
+                        wsURL = u.String()
+                case "81", "3000":
+                        // Local dev: connect directly to the signaling server on port 3003
                         u.Host = u.Hostname() + ":3003"
+                        u.Path = "/"
+                        u.RawQuery = ""
                         wsURL = u.String()
                 }
         }

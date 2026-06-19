@@ -1,0 +1,89 @@
+# ===========================================================================
+# .dockerignore - keep the Docker build context small
+# ===========================================================================
+
+# Version control
+.git
+.gitignore
+
+# Node.js
+node_modules
+**/node_modules
+.next
+out
+build
+dist
+
+# Bun
+bun.lockb
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files (use docker-compose env instead)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Documentation
+README.md
+*.md
+docs/
+
+# Database
+db/*.db
+db/*.db-journal
+
+# Test files
+__tests__
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+coverage
+
+# Python (we removed the Python client but keep this for safety)
+__pycache__
+*.pyc
+.venv
+venv
+
+# Go build artifacts (we rebuild inside Docker)
+customer-client-go/marqueeit-client
+customer-client-go/marqueeit-client-*
+customer-client-go/.remotehelp_venv
+
+# Download folder (we generate these inside Docker)
+download/
+
+# Skills (not needed in the production image)
+skills/
+
+# Examples
+examples/
+
+# Z scripts (only needed for the sandbox dev environment)
+.zscripts/
+
+# Upload folder
+upload/
+
+# Tool results
+tool-results/
