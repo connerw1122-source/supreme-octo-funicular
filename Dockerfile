@@ -24,9 +24,10 @@ COPY customer-client-go/ ./
 
 # Build for all three platforms. CGO is enabled for Linux (X11 input),
 # disabled for Windows/Mac (input injection is stubbed in those builds).
+# Windows uses -H windowsgui to hide the console window.
 RUN mkdir -p /out && \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/marqueeit-client-linux . && \
-    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-windows.exe . && \
+    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w -H windowsgui" -o /out/marqueeit-client-windows.exe . && \
     CGO_ENABLED=0 GOOS=darwin  GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-mac .
 
 # ---------------------------------------------------------------------------
@@ -69,9 +70,10 @@ FROM node:20-bookworm-slim AS runtime
 
 WORKDIR /app
 
-# Install openssl (Prisma needs it at runtime) and curl (for healthchecks)
+# Install openssl (Prisma needs it at runtime), curl (for healthchecks), and
+# zip (for generating session-zip downloads)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends openssl ca-certificates curl && \
+    apt-get install -y --no-install-recommends openssl ca-certificates curl zip && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy the standalone build

@@ -95,8 +95,6 @@ func (c *Client) Log(format string, args ...interface{}) {
 
 func (c *Client) Connect() error {
         // Try to mark the session as active in the database (best-effort).
-        // Skip if the server URL points at the signaling server (port 3003),
-        // which doesn't have /api/* routes.
         if !strings.Contains(c.serverURL, ":3003") {
                 joinURL := fmt.Sprintf("%s/api/sessions/%s/join", c.serverURL, c.code)
                 body, _ := json.Marshal(map[string]string{"customerName": c.name})
@@ -108,24 +106,16 @@ func (c *Client) Connect() error {
                 }
         }
 
-        // Build WebSocket URL.
-        // - If server URL is http://localhost:81 or http://localhost:3000 (local
-        //   dev), connect directly to port 3003.
-        // - If server URL is https://domain.com or http://domain.com (production
-        //   via Caddy), connect to the same origin — Caddy will route WS
-        //   upgrades to the signaling server.
+        // Build WebSocket URL
         wsURL := strings.Replace(c.serverURL, "http://", "ws://", 1)
         wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
         if u, err := url.Parse(wsURL); err == nil {
                 switch u.Port() {
                 case "", "80", "443":
-                        // Production: keep the same host/port (Caddy will route)
-                        // Just make sure the path is "/"
                         u.Path = "/"
                         u.RawQuery = ""
                         wsURL = u.String()
                 case "81", "3000":
-                        // Local dev: connect directly to the signaling server on port 3003
                         u.Host = u.Hostname() + ":3003"
                         u.Path = "/"
                         u.RawQuery = ""
@@ -138,6 +128,14 @@ func (c *Client) Connect() error {
         hdr.Set("X-Marqueeit-Code", c.code)
         hdr.Set("X-Marqueeit-Name", c.name)
         hdr.Set("X-Marqueeit-Role", "customer")
+        // Send machine specs via headers so the server has them immediately
+        specs := collectMachineSpecs()
+        hdr.Set("X-Marqueeit-Os", specs.OS)
+        hdr.Set("X-Marqueeit-Hostname", specs.Hostname)
+        hdr.Set("X-Marqueeit-Cpu", specs.CPU)
+        hdr.Set("X-Marqueeit-Ram", specs.RAM)
+        hdr.Set("X-Marqueeit-Screen", specs.Screen)
+        hdr.Set("X-Marqueeit-Arch", specs.Arch)
 
         dialer := websocket.Dialer{
                 HandshakeTimeout: 10 * time.Second,
@@ -150,6 +148,18 @@ func (c *Client) Connect() error {
         c.conn = conn
         c.connMu.Unlock()
         c.Log("Connected")
+
+        // Send machine specs as a JSON message too (for the browser to display)
+        specsMsg, _ := json.Marshal(map[string]interface{}{
+                "type":     "machine-specs",
+                "os":       specs.OS,
+                "hostname": specs.Hostname,
+                "cpu":      specs.CPU,
+                "ram":      specs.RAM,
+                "screen":   specs.Screen,
+                "arch":     specs.Arch,
+        })
+        conn.WriteMessage(websocket.TextMessage, specsMsg)
 
         // Start the screen stream
         c.wg.Add(1)
@@ -173,9 +183,9 @@ func (c *Client) screenLoop() {
         if probe, err := screenshot.CaptureDisplay(0); err == nil {
                 rect = probe.Bounds()
         }
-        c.Log("Streaming screen at %dx%d, ~10 FPS", rect.Dx(), rect.Dy())
+        c.Log("Streaming screen at %dx%d, ~30 FPS", rect.Dx(), rect.Dy())
 
-        ticker := time.NewTicker(100 * time.Millisecond) // 10 FPS
+        ticker := time.NewTicker(33 * time.Millisecond) // ~30 FPS
         defer ticker.Stop()
 
         for {
@@ -422,6 +432,25 @@ func main() {
                 server = env
         }
 
+        // Try to read session.json from the binary's directory.
+        // This is the no-command-line-args path: the customer downloads a zip
+        // with the binary + session.json, double-clicks the binary, and it
+        // reads the config automatically.
+        if code == "" && name == "" && unattended == "" {
+                if config := readSessionConfig(); config != nil {
+                        if code == "" {
+                                code = config.Code
+                        }
+                        if name == "" {
+                                name = config.Name
+                        }
+                        if server == DefaultServer && config.Server != "" {
+                                server = config.Server
+                        }
+                        log.Printf("Loaded session config: code=%s server=%s", code, server)
+                }
+        }
+
         if unattended != "" {
                 if len(unattended) < 4 {
                         fmt.Fprintln(os.Stderr, "Invalid machine code")
@@ -461,6 +490,38 @@ func main() {
         if err := c.Run(ctx); err != nil {
                 log.Fatalf("Client error: %v", err)
         }
+}
+
+// SessionConfig is the JSON structure the binary reads from session.json
+// in its own directory. This lets the customer double-click the binary
+// without any command-line arguments — the config file has everything.
+type SessionConfig struct {
+        Code   string `json:"code"`
+        Name   string `json:"name"`
+        Server string `json:"server"`
+}
+
+// readSessionConfig looks for session.json in the same directory as the
+// binary and returns its contents, or nil if not found.
+func readSessionConfig() *SessionConfig {
+        exe, err := os.Executable()
+        if err != nil {
+                return nil
+        }
+        dir := filepath.Dir(exe)
+        configPath := filepath.Join(dir, "session.json")
+        data, err := os.ReadFile(configPath)
+        if err != nil {
+                return nil
+        }
+        var config SessionConfig
+        if err := json.Unmarshal(data, &config); err != nil {
+                return nil
+        }
+        if config.Code == "" {
+                return nil
+        }
+        return &config
 }
 
 func handleSignals(cancel context.CancelFunc) {

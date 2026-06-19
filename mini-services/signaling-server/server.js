@@ -158,6 +158,11 @@ function setupWsHandlers(ws) {
         relayToRoom(d.roomCode, JSON.stringify({ type: 'stream-ready', from: d.peerId }), d.peerId)
         return
       }
+      // Relay machine-specs from customer to technician
+      if (m.type === 'machine-specs' && d.roomCode) {
+        relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
+        return
+      }
     } catch (err) {
       console.error('[ws] message error:', err)
     }

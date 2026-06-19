@@ -5,6 +5,7 @@ import { LandingView } from '@/components/landing-view'
 import { LoginView } from '@/components/login-view'
 import { TechnicianDashboard } from '@/components/technician-dashboard'
 import { CustomerDownload } from '@/components/customer-download'
+import { BrowserShare } from '@/components/browser-share'
 import { SessionView } from '@/components/session-view'
 import { Toaster } from 'sonner'
 import { clearSession, getSession } from '@/lib/auth'
@@ -14,6 +15,7 @@ type View =
   | { name: 'login' }
   | { name: 'technician'; technicianName: string }
   | { name: 'customer-download'; code: string; customerName: string }
+  | { name: 'browser-share'; code: string; customerName: string }
   | {
       name: 'session'
       roomCode: string
@@ -26,8 +28,15 @@ type View =
 // (from a previous login), boot straight into the technician dashboard.
 function getInitialView(): View {
   if (typeof window === 'undefined') return { name: 'landing' }
-  // Hash takes priority: #join/CODE or #join/CODE/NAME
   const hash = window.location.hash
+  // Browser share: #browser-share/CODE or #browser-share/CODE/NAME
+  const browserShareMatch = hash.match(/^#browser-share\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
+  if (browserShareMatch) {
+    const code = browserShareMatch[1].toUpperCase()
+    const customerName = browserShareMatch[2] ? decodeURIComponent(browserShareMatch[2]) : ''
+    return { name: 'browser-share', code, customerName }
+  }
+  // Customer download: #join/CODE or #join/CODE/NAME
   const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
   if (joinMatch) {
     const code = joinMatch[1].toUpperCase()
@@ -50,6 +59,15 @@ export default function Home() {
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash
+      // Browser share
+      const browserShareMatch = hash.match(/^#browser-share\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
+      if (browserShareMatch) {
+        const code = browserShareMatch[1].toUpperCase()
+        const customerName = browserShareMatch[2] ? decodeURIComponent(browserShareMatch[2]) : ''
+        setView({ name: 'browser-share', code, customerName })
+        return
+      }
+      // Customer download
       const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
       if (joinMatch) {
         const code = joinMatch[1].toUpperCase()
@@ -62,9 +80,9 @@ export default function Home() {
     return () => window.removeEventListener('hashchange', applyHash)
   }, [])
 
-  // Clear hash when we leave the customer-download view
+  // Clear hash when we leave customer views
   useEffect(() => {
-    if (view.name !== 'customer-download' && window.location.hash) {
+    if (view.name !== 'customer-download' && view.name !== 'browser-share' && window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
   }, [view.name])
@@ -147,6 +165,9 @@ export default function Home() {
       )}
       {view.name === 'customer-download' && (
         <CustomerDownload code={view.code} name={view.customerName} onBack={handleBackToLanding} />
+      )}
+      {view.name === 'browser-share' && (
+        <BrowserShare code={view.code} name={view.customerName} onBack={handleBackToLanding} />
       )}
       {view.name === 'session' && (
         <SessionView

@@ -42,6 +42,7 @@ import {
   LogOut,
   Server,
   MonitorSmartphone,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -206,6 +207,18 @@ export function TechnicianDashboard({
     setCopiedCode(code)
     toast.success('Join link copied')
     setTimeout(() => setCopiedCode(null), 2000)
+  }
+
+  const deleteSession = async (id: string, title: string) => {
+    if (!confirm(`Delete session "${title}"? This cannot be undone.`)) return
+    try {
+      const res = await fetch(`/api/sessions/${id}/delete`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete')
+      toast.success('Session deleted')
+      fetchSessions()
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to delete session')
+    }
   }
 
   const copyCode = (code: string) => {
@@ -426,6 +439,15 @@ export function TechnicianDashboard({
                                     Join
                                   </Button>
                                 )}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => deleteSession(s.id, s.title)}
+                                  className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                  title="Delete session"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </Button>
                               </div>
                             </TableCell>
                           </TableRow>

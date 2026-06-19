@@ -83,6 +83,14 @@ export function SessionView({
   const [connected, setConnected] = useState(false)
   const [customerConnected, setCustomerConnected] = useState(false)
   const [lastFrameAt, setLastFrameAt] = useState<number>(0)
+  const [machineSpecs, setMachineSpecs] = useState<{
+    os?: string
+    hostname?: string
+    cpu?: string
+    ram?: string
+    screen?: string
+    arch?: string
+  }>({})
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
@@ -187,6 +195,16 @@ export function SessionView({
           case 'session-ended':
             toast.info('Session ended')
             onEnded?.()
+            break
+          case 'machine-specs':
+            setMachineSpecs({
+              os: msg.os,
+              hostname: msg.hostname,
+              cpu: msg.cpu,
+              ram: msg.ram,
+              screen: msg.screen,
+              arch: msg.arch,
+            })
             break
         }
       } catch (err) {
@@ -498,6 +516,34 @@ export function SessionView({
               </>
             )}
           </div>
+          {/* Remote Control toggle — in the header so it's ALWAYS visible */}
+          {customerConnected && (
+            <div className={`flex items-center gap-2 rounded-md px-3 py-1.5 ${controlMode ? 'bg-[#1B3A6B]' : 'bg-slate-800'}`}>
+              <MousePointer2 className={`w-4 h-4 ${controlMode ? 'text-[#FFC425]' : 'text-slate-400'}`} />
+              <Label htmlFor="ctrl-toggle" className="text-xs font-medium text-slate-200 cursor-pointer hidden sm:inline">
+                Remote Control
+              </Label>
+              <Switch
+                id="ctrl-toggle"
+                checked={controlMode}
+                disabled={!controlAvailable}
+                onCheckedChange={(checked) => {
+                  setControlMode(checked)
+                  if (checked) {
+                    setShowAnnotationMode(false)
+                    toast.success("Remote Control ON")
+                  } else {
+                    toast.info('Remote Control OFF')
+                  }
+                }}
+              />
+              {controlMode && (
+                <Badge variant="outline" className="bg-[#FFC425]/20 text-[#FFC425] border-[#FFC425]/40 text-[10px]">
+                  ACTIVE
+                </Badge>
+              )}
+            </div>
+          )}
           <Button variant="destructive" size="sm" onClick={handleEnd}>
             <PhoneOff className="w-4 h-4 mr-1" />
             End
@@ -599,57 +645,6 @@ export function SessionView({
             </div>
           </div>
 
-          {/* Control bar */}
-          {customerConnected && (
-            <div className="border-t border-slate-800 bg-slate-950/60 px-4 py-2.5 shrink-0">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 bg-slate-800 rounded-md px-3 py-1.5">
-                    <MousePointer2 className={`w-4 h-4 ${controlMode ? 'text-[#FFC425]' : 'text-slate-400'}`} />
-                    <Label htmlFor="ctrl-toggle" className="text-xs font-medium text-slate-200 cursor-pointer">
-                      Remote Control
-                    </Label>
-                    <Switch
-                      id="ctrl-toggle"
-                      checked={controlMode}
-                      disabled={!controlAvailable}
-                      onCheckedChange={(checked) => {
-                        setControlMode(checked)
-                        if (checked) {
-                          setShowAnnotationMode(false)
-                          toast.success("Remote Control ON — your mouse and keyboard now control the customer's screen.")
-                        } else {
-                          toast.info('Remote Control OFF — back to view-only mode.')
-                        }
-                      }}
-                    />
-                    {controlMode ? (
-                      <Badge variant="outline" className="ml-1 bg-[#1B3A6B]/60 text-[#FFC425] border-[#1B3A6B] text-[10px]">
-                        ACTIVE
-                      </Badge>
-                    ) : !controlAvailable ? (
-                      <span className="text-[10px] text-slate-500 ml-1">waiting for customer…</span>
-                    ) : (
-                      <span className="text-[10px] text-slate-500 ml-1">view-only</span>
-                    )}
-                  </div>
-                </div>
-                {controlMode && lastInputSent > 0 && (
-                  <span className="text-[10px] text-[#FFC425] flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#FFC425] animate-pulse" />
-                    Sending input
-                  </span>
-                )}
-              </div>
-              {controlMode && (
-                <p className="text-[11px] text-slate-400 mt-1.5 flex items-center gap-1">
-                  <Keyboard className="w-3 h-3" />
-                  Your keyboard is captured. Click any text field on the right to type chat messages without affecting the remote screen.
-                </p>
-              )}
-            </div>
-          )}
-
           {/* Status bar */}
           <div className="border-t border-slate-800 bg-slate-900 px-4 py-2 text-xs text-slate-400 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-3">
@@ -660,15 +655,21 @@ export function SessionView({
               {!receivingFrames && customerConnected && (
                 <span className="flex items-center gap-1 text-amber-400">
                   <AlertCircle className="w-3.5 h-3.5" />
-                  Waiting for screen frames from customer…
+                  Waiting for screen frames…
+                </span>
+              )}
+              {controlMode && lastInputSent > 0 && (
+                <span className="text-[#FFC425] flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#FFC425] animate-pulse" />
+                  Sending input
                 </span>
               )}
             </div>
-            <div>
+            <div className="hidden md:block">
               {controlMode
-                ? "Controlling the customer's screen. Toggle Remote Control off to stop."
+                ? "Controlling the customer's screen."
                 : customerConnected
-                ? "Viewing the customer's screen. Turn on Remote Control to take over."
+                ? "Viewing. Toggle Remote Control to take over."
                 : 'Waiting for the customer to run the helper app.'}
             </div>
           </div>
@@ -777,6 +778,44 @@ export function SessionView({
                     Last frame: {lastFrameAt ? `${Math.max(0, Math.floor((Date.now() - lastFrameAt) / 1000))}s ago` : 'never'}
                   </p>
                 </div>
+                {/* Customer machine specs */}
+                {machineSpecs.os && (
+                  <div>
+                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Customer Machine</p>
+                    <div className="space-y-1 text-xs text-slate-300">
+                      {machineSpecs.hostname && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Hostname</span>
+                          <span className="font-mono">{machineSpecs.hostname}</span>
+                        </div>
+                      )}
+                      {machineSpecs.os && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">OS</span>
+                          <span>{machineSpecs.os} {machineSpecs.arch && `(${machineSpecs.arch})`}</span>
+                        </div>
+                      )}
+                      {machineSpecs.cpu && (
+                        <div className="flex justify-between gap-2">
+                          <span className="text-slate-500 shrink-0">CPU</span>
+                          <span className="text-right">{machineSpecs.cpu}</span>
+                        </div>
+                      )}
+                      {machineSpecs.ram && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">RAM</span>
+                          <span>{machineSpecs.ram}</span>
+                        </div>
+                      )}
+                      {machineSpecs.screen && (
+                        <div className="flex justify-between">
+                          <span className="text-slate-500">Screen</span>
+                          <span className="font-mono">{machineSpecs.screen}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             </TabsContent>
           </Tabs>
