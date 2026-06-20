@@ -26,6 +26,7 @@ import (
         "encoding/json"
         "flag"
         "fmt"
+        "image"
         "image/jpeg"
         "log"
         "net/http"
@@ -186,12 +187,18 @@ func (c *Client) screenLoop() {
                 case <-c.ctx.Done():
                         return
                 case <-time.After(time.Duration(targetFPS) * time.Millisecond):
-                        // Use currentMonitor (switchable via switch-monitor command)
-                        monIdx := currentMonitor
-                        if monIdx >= screenshot.NumActiveDisplays() {
-                                monIdx = 0
+                        // Use desktop-aware capture (handles lock screen on Windows)
+                        var img *image.RGBA
+                        var err error
+                        if runtime.GOOS == "windows" {
+                                img, err = captureScreenWindows()
+                        } else {
+                                monIdx := currentMonitor
+                                if monIdx >= screenshot.NumActiveDisplays() {
+                                        monIdx = 0
+                                }
+                                img, err = screenshot.CaptureDisplay(monIdx)
                         }
-                        img, err := screenshot.CaptureDisplay(monIdx)
                         if err != nil {
                                 c.Log("Capture error: %v", err)
                                 continue
@@ -271,8 +278,8 @@ func (c *Client) readLoop() {
                         }
                 case "chat", "chat-message":
                         c.Log("[chat] %s: %s", envelope.Sender, envelope.Content)
-                        // Show a toast notification (non-blocking, auto-dismisses)
-                        showToast("MarqueeIT - "+envelope.Sender, envelope.Content)
+                        // Deliver to the floating chat window
+                        deliverChatMessage(envelope.Sender, envelope.Content)
                 case "session-ended", "end-session":
                         c.Log("Session ended by technician")
                         c.shutdown()
