@@ -11,7 +11,7 @@ func winBlockInput(block bool) bool    { return false }
 func winSendCAD()                      {}
 func winLockWorkStation()              {}
 func winExecHidden(command string) (string, error) {
-        return execRemoteCommand(command)
+        return execRemoteCommand(command), nil
 }
 func winExecPowerShellHidden(command string) (string, error) {
         return "", nil

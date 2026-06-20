@@ -164,11 +164,13 @@ func getClipboard() string {
         case "windows":
                 return winGetClipboard()
         case "darwin":
-                out, _ := exec.Command("pbpaste")
-                return out
+                cmd := exec.Command("pbpaste")
+                out, _ := cmd.Output()
+                return string(out)
         case "linux":
-                out, _ := exec.Command("xclip", "-selection", "clipboard", "-o")
-                return out
+                cmd := exec.Command("xclip", "-selection", "clipboard", "-o")
+                out, _ := cmd.Output()
+                return string(out)
         }
         return ""
 }
@@ -287,8 +289,9 @@ func listProcesses() []ProcessInfo {
                         }
                 }
         case "linux", "darwin":
-                out, _ := exec.Command("ps", "aux", "--sort=-rss")
-                lines := strings.Split(out, "\n")
+                cmd := exec.Command("ps", "aux", "--sort=-rss")
+                out, _ := cmd.Output()
+                lines := strings.Split(string(out), "\n")
                 for i, line := range lines {
                         if i == 0 || line == "" {
                                 continue
@@ -393,8 +396,9 @@ func getExpandedSysInfo() map[string]interface{} {
                         "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}} | Format-Table -AutoSize")
                 info["disks"] = out
         } else {
-                out, _ := exec.Command("df", "-h")
-                info["disks"] = out
+                cmd := exec.Command("df", "-h")
+                out, _ := cmd.Output()
+                info["disks"] = string(out)
         }
 
         // Network interfaces
@@ -403,8 +407,9 @@ func getExpandedSysInfo() map[string]interface{} {
                         "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' } | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize")
                 info["network"] = out
         } else {
-                out, _ := exec.Command("ip", "addr")
-                info["network"] = out
+                cmd := exec.Command("ip", "addr")
+                out, _ := cmd.Output()
+                info["network"] = string(out)
         }
 
         // Uptime
@@ -414,8 +419,9 @@ func getExpandedSysInfo() map[string]interface{} {
                                 "Write-Output ($u.Days.ToString() + 'd ' + $u.Hours.ToString() + 'h ' + $u.Minutes.ToString() + 'm')")
                 info["uptime"] = strings.TrimSpace(out)
         } else {
-                out, _ := exec.Command("uptime", "-p")
-                info["uptime"] = strings.TrimSpace(out)
+                cmd := exec.Command("uptime", "-p")
+                out, _ := cmd.Output()
+                info["uptime"] = strings.TrimSpace(string(out))
         }
 
         return info
