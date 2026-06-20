@@ -51,9 +51,7 @@ services:
       - "3000"
     networks:
       - default
-      # Connect to your existing proxy's network so it can reach these
-      # containers by name. Uncomment and rename to match your setup:
-      # - copyparty_default
+      - copyparty_default
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
       interval: 30s
@@ -77,7 +75,7 @@ services:
       - "3003"
     networks:
       - default
-      # - copyparty_default
+      - copyparty_default
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3003/health"]
       interval: 30s
@@ -96,6 +94,5 @@ volumes:
 networks:
   default:
     driver: bridge
-  # Example: connect to an existing external network
-  # copyparty_default:
-  #   external: true
+  copyparty_default:
+    external: true
