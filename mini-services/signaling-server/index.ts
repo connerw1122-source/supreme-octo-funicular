@@ -135,12 +135,12 @@ const server = Bun.serve({
           // --- Relay all system commands to the customer ---
           // These are commands FROM the technician TO the customer
           const systemCommandTypes = [
-            'clipboard-set', 'clipboard-get', 'lock-input', 'unlock-input',
+            'clipboard-set', 'clipboard-get', 'clipboard-keystrokes', 'lock-input', 'unlock-input',
             'lock-screen', 'unlock-screen', 'send-cad', 'exec-command',
             'list-processes', 'kill-process', 'list-monitors', 'switch-monitor',
             'set-quality', 'get-sysinfo', 'reboot',
             'recording-start', 'recording-stop',
-            'install-unattended', 'elevate-session',
+            'install-unattended', 'elevate-session', 'remove-unattended',
           ]
           if (systemCommandTypes.includes(m.type) && d.roomCode) {
             relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)

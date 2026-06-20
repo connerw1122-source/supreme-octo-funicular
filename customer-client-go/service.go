@@ -83,11 +83,11 @@ func installServiceElevated(machineCode, serverURL string) error {
         if runtime.GOOS == "windows" {
                 serviceName := "MarqueeIT"
 
-                // Write a batch file that creates the service AND starts unattended mode
+                // Write a batch file that creates the service AND starts it
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-install-svc.bat")
                 bat := fmt.Sprintf(`@echo off
-sc stop "%s" 2>nul
-sc delete "%s" 2>nul
+sc stop "%s" >nul 2>&1
+sc delete "%s" >nul 2>&1
 sc create "%s" binPath= "%s --unattended %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
 sc start "%s"
 echo DONE > "%s"

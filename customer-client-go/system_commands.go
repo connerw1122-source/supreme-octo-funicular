@@ -36,6 +36,11 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         "text":   text,
                         "source": "set-confirm",
                 })
+        case "clipboard-keystrokes":
+                // Type text character by character (for pasting into fields that
+                // don't accept clipboard paste, like password fields)
+                text, _ := msg["text"].(string)
+                keyType(text)
 
         case "clipboard-get":
                 text := getClipboard()
@@ -64,16 +69,28 @@ func HandleSystemCommand(msg map[string]interface{}) {
         case "exec-command":
                 command, _ := msg["command"].(string)
                 elevated, _ := msg["elevated"].(bool)
-                var result string
-                if elevated {
-                        result = execElevatedCommand(command)
-                } else {
-                        result = execRemoteCommand(command)
-                }
+                id, _ := msg["id"].(string)
+                // Run in a goroutine so it doesn't block the read loop
+                go func() {
+                        var result string
+                        if elevated {
+                                result = execElevatedCommand(command)
+                        } else {
+                                result = execRemoteCommand(command)
+                        }
+                        sendJSON(map[string]interface{}{
+                                "type":   "command-output",
+                                "output": result,
+                                "id":     id,
+                                "command": command,
+                        })
+                }()
+                // Send immediate acknowledgment
                 sendJSON(map[string]interface{}{
-                        "type":   "command-output",
-                        "output": result,
-                        "id":     msg["id"],
+                        "type":    "command-output",
+                        "output":  "[running...]",
+                        "id":      id,
+                        "command": command,
                 })
 
         // --- Task Manager ---
@@ -126,19 +143,38 @@ func HandleSystemCommand(msg map[string]interface{}) {
 
         // --- Elevate session (restart client as admin) ---
         case "elevate-session":
-                showMessageBox("MarqueeIT - Admin Required",
-                        "Your technician is requesting to restart MarqueeIT with administrator privileges.\n\nPlease click YES on the UAC prompt.")
                 exe, _ := os.Executable()
-                // Get current command-line args to re-launch with same session
                 psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -ArgumentList '-code','%s','-server','%s' -Verb RunAs`, exe, globalClient.code, globalClient.serverURL)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
                 cmd.Start()
-                // Acknowledge then shut down (the elevated copy will take over)
                 sendJSON(map[string]interface{}{"type": "elevate-result", "result": "restarting"})
                 time.Sleep(1 * time.Second)
                 globalClient.shutdown()
+
+        // --- Remove unattended service ---
+        case "remove-unattended":
+                if runtime.GOOS == "windows" {
+                        serviceName := "MarqueeIT"
+                        tmpBat := filepath.Join(os.TempDir(), "marqueeit-remove-svc.bat")
+                        bat := fmt.Sprintf(`@echo off
+sc stop "%s" >nul 2>&1
+sc delete "%s" >nul 2>&1
+echo DONE
+`, serviceName, serviceName)
+                        os.WriteFile(tmpBat, []byte(bat), 0644)
+                        psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpBat)
+                        cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
+                        cmd.SysProcAttr = &syscall.SysProcAttr{}
+                        hideWindow(cmd.SysProcAttr)
+                        cmd.Run()
+                        os.Remove(tmpBat)
+                        sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                } else {
+                        uninstallService()
+                        sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                }
 
         // --- Install as unattended service (during active session) ---
         case "install-unattended":
@@ -310,32 +346,24 @@ func execRemoteCommand(command string) string {
 // command runs. We don't wait for it to finish (which would block input).
 func execElevatedCommand(command string) string {
         if runtime.GOOS == "windows" {
-                // Write the command to a temp .bat file
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-elevated.bat")
                 tmpOut := filepath.Join(os.TempDir(), "marqueeit-elevated-out.txt")
                 batContent := fmt.Sprintf("@echo off\n%s > \"%s\" 2>&1", command, tmpOut)
                 os.WriteFile(tmpBat, []byte(batContent), 0644)
 
-                // Show a message box explaining what's happening
-                showMessageBox("MarqueeIT - Admin Required",
-                        "Your technician is requesting administrator privileges to run:\n\n"+command+
-                                "\n\nPlease click YES on the UAC prompt.")
-
-                // Execute via PowerShell Start-Process -Verb RunAs (NO -Wait, non-blocking)
+                // Execute via PowerShell Start-Process -Verb RunAs (non-blocking, no popup)
                 psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpBat)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
                 cmd.Start() // non-blocking
 
-                // Wait a few seconds for the output file to appear, then read it
+                // Wait a few seconds for output, then read it
                 time.Sleep(5 * time.Second)
                 out, _ := os.ReadFile(tmpOut)
                 os.Remove(tmpBat)
-                // Don't delete tmpOut yet — the elevated process might still be writing
                 return string(out) + "\n[elevated command running — output may be incomplete]"
         }
-        // Linux/Mac: use sudo (non-blocking)
         cmd := exec.Command("sudo", "sh", "-c", command)
         out, err := cmd.Output()
         if err != nil {

@@ -289,12 +289,12 @@ func (c *Client) readLoop() {
                         if err := json.Unmarshal(data, &sysMsg); err == nil {
                                 if sysType, ok := sysMsg["type"].(string); ok {
                                         switch sysType {
-                                        case "clipboard-set", "clipboard-get", "lock-input", "unlock-input",
+                                        case "clipboard-set", "clipboard-get", "clipboard-keystrokes", "lock-input", "unlock-input",
                                                 "lock-screen", "unlock-screen", "send-cad", "exec-command",
                                                 "list-processes", "kill-process", "list-monitors", "switch-monitor",
                                                 "set-quality", "get-sysinfo", "reboot",
                                                 "recording-start", "recording-stop",
-                                                "install-unattended", "elevate-session":
+                                                "install-unattended", "elevate-session", "remove-unattended":
                                                 HandleSystemCommand(sysMsg)
                                         }
                                 }

@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 function generateCode(): string {
-  // Easy-to-read 6-char code: no ambiguous chars (0/O, 1/I)
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  // 6-digit numeric code
+  const digits = '0123456789'
   let out = ''
   for (let i = 0; i < 6; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)]
+    out += digits[Math.floor(Math.random() * digits.length)]
   }
   return out
 }

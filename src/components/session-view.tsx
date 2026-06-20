@@ -393,11 +393,12 @@ export function SessionView({
 
   const sendClipboard = useCallback((text: string, asKeystrokes: boolean = false) => {
     if (asKeystrokes) {
-      // Send each character as a key_type event instead of clipboard-set
-      sendSystemCommand({ type: 'exec-command', command: 'echo "' + text.replace(/"/g, '\\"') + '" | clip', id: Math.random().toString(36).slice(2) })
+      // Send text as individual keystrokes to type it on the customer's machine
+      sendSystemCommand({ type: 'clipboard-keystrokes', text })
       toast.success('Sent as keystrokes to customer')
     } else {
       sendSystemCommand({ type: 'clipboard-set', text })
+      toast.success('Clipboard sent to customer')
     }
     setClipboardHistory((prev) => [{
       id: Math.random().toString(36).slice(2),
@@ -405,7 +406,6 @@ export function SessionView({
       direction: 'out' as const,
       timestamp: new Date().toISOString(),
     }, ...prev].slice(0, 20))
-    if (!asKeystrokes) toast.success('Clipboard sent to customer')
   }, [sendSystemCommand])
 
   const getClipboard = useCallback(() => {
@@ -519,21 +519,22 @@ export function SessionView({
   const handleControlMouseDown = useCallback((e: React.MouseEvent) => {
     if (!controlMode) return
     e.preventDefault()
-    const coords = getRelativeCoords(e)
-    if (!coords) return
-    const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-    sendInput({ type: 'mouse_down', x: coords.x, y: coords.y, button })
-  }, [controlMode, getRelativeCoords, sendInput])
+  }, [controlMode])
 
   const handleControlMouseUp = useCallback((e: React.MouseEvent) => {
     if (!controlMode) return
+    e.preventDefault()
+    const coords = getRelativeCoords(e)
+    if (!coords) return
     const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-    sendInput({ type: 'mouse_up', button })
-  }, [controlMode, sendInput])
+    // Send a single click on mouseup (not separate down + up)
+    sendInput({ type: 'mouse_click', x: coords.x, y: coords.y, button })
+  }, [controlMode, getRelativeCoords, sendInput])
 
   const handleControlWheel = useCallback((e: React.WheelEvent) => {
     if (!controlMode) return
-    sendInput({ type: 'mouse_scroll', dx: e.deltaX / 100, dy: e.deltaY / 100 })
+    // Invert deltaY: scrolling up (negative deltaY) should scroll up on remote
+    sendInput({ type: 'mouse_scroll', dx: e.deltaX / 100, dy: -e.deltaY / 100 })
   }, [controlMode, sendInput])
 
   const handleControlContext = useCallback((e: React.MouseEvent) => {
@@ -1128,9 +1129,10 @@ export function SessionView({
                     ))
                   )}
                 </div>
-                <div className="border-t border-slate-800 p-2 flex gap-1">
+                <div className="border-t border-slate-800 p-2 space-y-1.5">
                   <Input
-                    placeholder="Paste text to send to customer..."
+                    id="clipboard-input"
+                    placeholder="Type text to send to customer..."
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && e.currentTarget.value.trim()) {
                         sendClipboard(e.currentTarget.value.trim())
@@ -1139,19 +1141,37 @@ export function SessionView({
                     }}
                     className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
                   />
-                  <Button
-                    size="sm"
-                    onClick={(e) => {
-                      const input = e.currentTarget.previousElementSibling as HTMLInputElement
-                      if (input?.value?.trim()) {
-                        sendClipboard(input.value.trim())
-                        input.value = ''
-                      }
-                    }}
-                    className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        const input = document.getElementById('clipboard-input') as HTMLInputElement
+                        if (input?.value?.trim()) {
+                          sendClipboard(input.value.trim())
+                          input.value = ''
+                        }
+                      }}
+                      className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2 flex-1"
+                    >
+                      <Send className="w-3.5 h-3.5 mr-1" />
+                      Send to Clipboard
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        const input = document.getElementById('clipboard-input') as HTMLInputElement
+                        if (input?.value?.trim()) {
+                          sendClipboard(input.value.trim(), true)
+                          input.value = ''
+                        }
+                      }}
+                      className="border-slate-600 text-slate-300 hover:bg-slate-800 h-8 px-2 flex-1"
+                    >
+                      <Keyboard className="w-3.5 h-3.5 mr-1" />
+                      Type as Keystrokes
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
