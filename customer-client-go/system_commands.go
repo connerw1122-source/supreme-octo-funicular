@@ -79,10 +79,11 @@ func HandleSystemCommand(msg map[string]interface{}) {
                                 result = execRemoteCommand(command)
                         }
                         sendJSON(map[string]interface{}{
-                                "type":   "command-output",
-                                "output": result,
-                                "id":     id,
+                                "type":    "command-output",
+                                "output":  result,
+                                "id":      id,
                                 "command": command,
+                                "final":   true,
                         })
                 }()
                 // Send immediate acknowledgment
@@ -91,6 +92,7 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         "output":  "[running...]",
                         "id":      id,
                         "command": command,
+                        "final":   false,
                 })
 
         // --- Task Manager ---
@@ -342,27 +344,52 @@ func execRemoteCommand(command string) string {
 }
 
 // execElevatedCommand runs a command with admin privileges via UAC prompt.
-// Non-blocking — the UAC prompt appears, the customer clicks YES, and the
-// command runs. We don't wait for it to finish (which would block input).
+// Non-blocking — uses a done marker file to know when output is ready.
 func execElevatedCommand(command string) string {
         if runtime.GOOS == "windows" {
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-elevated.bat")
                 tmpOut := filepath.Join(os.TempDir(), "marqueeit-elevated-out.txt")
-                batContent := fmt.Sprintf("@echo off\n%s > \"%s\" 2>&1", command, tmpOut)
+                tmpDone := filepath.Join(os.TempDir(), "marqueeit-elevated-done.txt")
+                // Clean up any previous files
+                os.Remove(tmpOut)
+                os.Remove(tmpDone)
+
+                batContent := fmt.Sprintf(`@echo off
+%s > "%s" 2>&1
+echo DONE > "%s"
+`, command, tmpOut, tmpDone)
                 os.WriteFile(tmpBat, []byte(batContent), 0644)
 
-                // Execute via PowerShell Start-Process -Verb RunAs (non-blocking, no popup)
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpBat)
+                // Execute via VBS wrapper (completely silent, no cmd window)
+                tmpVbs := filepath.Join(os.TempDir(), "marqueeit-elevated.vbs")
+                vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "%s", 0, True
+`, tmpBat)
+                os.WriteFile(tmpVbs, []byte(vbs), 0644)
+
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpVbs)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
                 cmd.Start() // non-blocking
 
-                // Wait a few seconds for output, then read it
-                time.Sleep(5 * time.Second)
+                // Wait for the done marker (up to 5 minutes for long commands like sfc)
+                for i := 0; i < 600; i++ {
+                        if _, err := os.Stat(tmpDone); err == nil {
+                                break
+                        }
+                        time.Sleep(500 * time.Millisecond)
+                }
+
                 out, _ := os.ReadFile(tmpOut)
                 os.Remove(tmpBat)
-                return string(out) + "\n[elevated command running — output may be incomplete]"
+                os.Remove(tmpVbs)
+                os.Remove(tmpOut)
+                os.Remove(tmpDone)
+                if len(out) == 0 {
+                        return "[command completed with no output]"
+                }
+                return string(out)
         }
         cmd := exec.Command("sudo", "sh", "-c", command)
         out, err := cmd.Output()

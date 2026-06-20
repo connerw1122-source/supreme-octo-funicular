@@ -102,17 +102,25 @@ WshShell.Run "%s", 0, True
 `, tmpBat)
                 os.WriteFile(tmpVbs, []byte(vbs), 0644)
 
-                // Run elevated via PowerShell (UAC prompt, no message box)
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpVbs)
+                // Run elevated via PowerShell (no -Wait, we poll for done marker)
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpVbs)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
-                err := cmd.Run()
+                cmd.Start() // non-blocking
+
+                // Wait for the done marker (up to 30 seconds)
+                donePath := filepath.Join(os.TempDir(), "marqueeit-svc-done.txt")
+                os.Remove(donePath)
+                for i := 0; i < 60; i++ {
+                        if _, err := os.Stat(donePath); err == nil {
+                                break
+                        }
+                        time.Sleep(500 * time.Millisecond)
+                }
                 os.Remove(tmpBat)
                 os.Remove(tmpVbs)
-                if err != nil {
-                        return fmt.Errorf("elevated install failed: %w", err)
-                }
+                os.Remove(donePath)
                 return nil
         }
 

@@ -351,33 +351,29 @@ export function SessionView({
     if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
 
-    // The canvas element may be larger than the actual image displayed
-    // because of object-contain letterboxing. We need to compute the
-    // actual displayed image area within the canvas.
+    // If canvas has no intrinsic dimensions yet (no frames received),
+    // fall back to simple bounding-rect-relative coordinates
+    const imgW = canvas.width
+    const imgH = canvas.height
+    if (imgW === 0 || imgH === 0) {
+      const x = (e.clientX - rect.left) / rect.width
+      const y = (e.clientY - rect.top) / rect.height
+      if (x < 0 || x > 1 || y < 0 || y > 1) return null
+      return { x, y }
+    }
+
+    // Account for object-contain letterboxing
     const canvasW = rect.width
     const canvasH = rect.height
-    const imgW = canvas.width   // intrinsic image width (set by drawFrame)
-    const imgH = canvas.height  // intrinsic image height
-
-    if (imgW === 0 || imgH === 0) return null
-
-    // Compute the scale and offset of the image within the canvas
     const scaleX = canvasW / imgW
     const scaleY = canvasH / imgH
-    const scale = Math.min(scaleX, scaleY) // object-contain uses min
-
-    // Displayed image dimensions
+    const scale = Math.min(scaleX, scaleY)
     const dispW = imgW * scale
     const dispH = imgH * scale
-
-    // Offsets (letterbox borders)
     const offsetX = (canvasW - dispW) / 2
     const offsetY = (canvasH - dispH) / 2
-
-    // Convert mouse position to image coordinates
     const imgX = (e.clientX - rect.left - offsetX) / dispW
     const imgY = (e.clientY - rect.top - offsetY) / dispH
-
     if (imgX < 0 || imgX > 1 || imgY < 0 || imgY > 1) return null
     return { x: imgX, y: imgY }
   }, [])
@@ -1135,43 +1131,26 @@ export function SessionView({
                     placeholder="Type text to send to customer..."
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                        sendClipboard(e.currentTarget.value.trim())
+                        sendClipboard(e.currentTarget.value.trim(), true)
                         e.currentTarget.value = ''
                       }
                     }}
                     className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8"
                   />
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        const input = document.getElementById('clipboard-input') as HTMLInputElement
-                        if (input?.value?.trim()) {
-                          sendClipboard(input.value.trim())
-                          input.value = ''
-                        }
-                      }}
-                      className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2 flex-1"
-                    >
-                      <Send className="w-3.5 h-3.5 mr-1" />
-                      Send to Clipboard
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        const input = document.getElementById('clipboard-input') as HTMLInputElement
-                        if (input?.value?.trim()) {
-                          sendClipboard(input.value.trim(), true)
-                          input.value = ''
-                        }
-                      }}
-                      className="border-slate-600 text-slate-300 hover:bg-slate-800 h-8 px-2 flex-1"
-                    >
-                      <Keyboard className="w-3.5 h-3.5 mr-1" />
-                      Type as Keystrokes
-                    </Button>
-                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const input = document.getElementById('clipboard-input') as HTMLInputElement
+                      if (input?.value?.trim()) {
+                        sendClipboard(input.value.trim(), true)
+                        input.value = ''
+                      }
+                    }}
+                    className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2 w-full"
+                  >
+                    <Keyboard className="w-3.5 h-3.5 mr-1" />
+                    Type as Keystrokes
+                  </Button>
                 </div>
               </div>
             )}
