@@ -473,24 +473,32 @@ func main() {
                 return
         }
 
-        // Try to read session config from session.json OR from the binary's
-        // own filename. The customer downloads "marqueeit-AHC6E.exe" and
-        // double-clicks it — the code is extracted from the filename.
+        // Try to read session config from:
+        // 1. A trailer appended to the end of this binary (MARQUEEIT_CONFIG{...}\n)
+        // 2. session.json in the binary's directory
+        // 3. The binary's filename (legacy fallback)
         if code == "" && name == "" && unattended == "" {
-                // First try session.json
-                if config := readSessionConfig(); config != nil {
-                        if code == "" {
-                                code = config.Code
-                        }
-                        if name == "" {
-                                name = config.Name
-                        }
+                // First try the embedded trailer
+                if config := readEmbeddedConfig(); config != nil {
+                        code = config.Code
+                        name = config.Name
                         if server == DefaultServer && config.Server != "" {
                                 server = config.Server
                         }
-                        log.Printf("Loaded session config: code=%s server=%s", code, server)
+                        log.Printf("Loaded embedded config: code=%s server=%s", code, server)
                 }
-                // Then try extracting from the binary's filename
+                // Then try session.json
+                if code == "" {
+                        if config := readSessionConfig(); config != nil {
+                                code = config.Code
+                                name = config.Name
+                                if server == DefaultServer && config.Server != "" {
+                                        server = config.Server
+                                }
+                                log.Printf("Loaded session.json config: code=%s server=%s", code, server)
+                        }
+                }
+                // Then try extracting from filename (legacy)
                 if code == "" {
                         if fc := extractCodeFromFilename(); fc != "" {
                                 code = fc
@@ -567,6 +575,46 @@ func readSessionConfig() *SessionConfig {
         }
         var config SessionConfig
         if err := json.Unmarshal(data, &config); err != nil {
+                return nil
+        }
+        if config.Code == "" {
+                return nil
+        }
+        return &config
+}
+
+// readEmbeddedConfig reads a config trailer appended to the end of this
+// binary. The trailer format is:
+//   MARQUEEIT_CONFIG{"code":"ABC123","name":"Margaret","server":"https://..."}\n
+//
+// Go binaries ignore extra data after the executable, so this is safe.
+// This is the primary config mechanism — the server appends it when serving
+// the binary for download, so every download has the correct session code
+// and server URL embedded. The filename doesn't matter.
+func readEmbeddedConfig() *SessionConfig {
+        exe, err := os.Executable()
+        if err != nil {
+                return nil
+        }
+        data, err := os.ReadFile(exe)
+        if err != nil {
+                return nil
+        }
+        // Search for the trailer prefix from the end of the file
+        trailerPrefix := "MARQUEEIT_CONFIG"
+        idx := strings.LastIndex(string(data), trailerPrefix)
+        if idx == -1 {
+                return nil
+        }
+        // Extract from the prefix to the next newline
+        rest := string(data[idx+len(trailerPrefix):])
+        newlineIdx := strings.IndexByte(rest, '\n')
+        if newlineIdx == -1 {
+                newlineIdx = len(rest)
+        }
+        jsonStr := strings.TrimSpace(rest[:newlineIdx])
+        var config SessionConfig
+        if err := json.Unmarshal([]byte(jsonStr), &config); err != nil {
                 return nil
         }
         if config.Code == "" {

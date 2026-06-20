@@ -5,7 +5,6 @@ import { LandingView } from '@/components/landing-view'
 import { LoginView } from '@/components/login-view'
 import { TechnicianDashboard } from '@/components/technician-dashboard'
 import { CustomerDownload } from '@/components/customer-download'
-import { BrowserShare } from '@/components/browser-share'
 import { SessionView } from '@/components/session-view'
 import { Toaster } from 'sonner'
 import { clearSession, getSession } from '@/lib/auth'
@@ -15,7 +14,6 @@ type View =
   | { name: 'login' }
   | { name: 'technician'; technicianName: string }
   | { name: 'customer-download'; code: string; customerName: string }
-  | { name: 'browser-share'; code: string; customerName: string }
   | {
       name: 'session'
       roomCode: string
@@ -29,12 +27,9 @@ type View =
 function getInitialView(): View {
   if (typeof window === 'undefined') return { name: 'landing' }
   const hash = window.location.hash
-  // Browser share: #browser-share/CODE or #browser-share/CODE/NAME
-  const browserShareMatch = hash.match(/^#browser-share\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
   if (browserShareMatch) {
     const code = browserShareMatch[1].toUpperCase()
     const customerName = browserShareMatch[2] ? decodeURIComponent(browserShareMatch[2]) : ''
-    return { name: 'browser-share', code, customerName }
   }
   // Customer download: #join/CODE or #join/CODE/NAME
   const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
@@ -60,11 +55,9 @@ export default function Home() {
     const applyHash = () => {
       const hash = window.location.hash
       // Browser share
-      const browserShareMatch = hash.match(/^#browser-share\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
       if (browserShareMatch) {
         const code = browserShareMatch[1].toUpperCase()
         const customerName = browserShareMatch[2] ? decodeURIComponent(browserShareMatch[2]) : ''
-        setView({ name: 'browser-share', code, customerName })
         return
       }
       // Customer download
@@ -82,7 +75,7 @@ export default function Home() {
 
   // Clear hash when we leave customer views
   useEffect(() => {
-    if (view.name !== 'customer-download' && view.name !== 'browser-share' && window.location.hash) {
+    if (view.name !== 'customer-download' && window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
   }, [view.name])
@@ -148,7 +141,7 @@ export default function Home() {
   // ---------------------------------------------------------------------------
   return (
     <>
-      <Toaster position="top-right" richColors closeButton />
+      <Toaster position="bottom-left" richColors closeButton toastOptions={{ style: { marginBottom: '60px' } }} />
       {view.name === 'landing' && (
         <LandingView onCustomer={handleCustomer} onTechnicianLogin={handleTechnicianLogin} />
       )}
@@ -165,9 +158,6 @@ export default function Home() {
       )}
       {view.name === 'customer-download' && (
         <CustomerDownload code={view.code} name={view.customerName} onBack={handleBackToLanding} />
-      )}
-      {view.name === 'browser-share' && (
-        <BrowserShare code={view.code} name={view.customerName} onBack={handleBackToLanding} />
       )}
       {view.name === 'session' && (
         <SessionView

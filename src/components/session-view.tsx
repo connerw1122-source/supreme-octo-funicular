@@ -953,13 +953,38 @@ export function SessionView({
                 )}
                 {expandedSysInfo && (
                   <div>
-                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Expanded System Info</p>
+                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">System Details</p>
                     <div className="space-y-2 text-xs text-slate-300">
-                      {expandedSysInfo.uptime && <div><span className="text-slate-500">Uptime:</span> {expandedSysInfo.uptime}</div>}
-                      {expandedSysInfo.cpus && <div><span className="text-slate-500">CPU cores:</span> {expandedSysInfo.cpus}</div>}
-                      {expandedSysInfo.disks && <pre className="bg-slate-800 p-2 rounded text-[10px] overflow-x-auto max-h-32">{expandedSysInfo.disks}</pre>}
-                      {expandedSysInfo.network && <pre className="bg-slate-800 p-2 rounded text-[10px] overflow-x-auto max-h-32">{expandedSysInfo.network}</pre>}
-                      {expandedSysInfo.installed_software && <pre className="bg-slate-800 p-2 rounded text-[10px] overflow-x-auto max-h-48">{expandedSysInfo.installed_software}</pre>}
+                      {expandedSysInfo.uptime && (
+                        <div>
+                          <span className="text-slate-500 font-medium">How long since last restart:</span>
+                          <span className="ml-1">{expandedSysInfo.uptime}</span>
+                        </div>
+                      )}
+                      {expandedSysInfo.cpus && (
+                        <div>
+                          <span className="text-slate-500 font-medium">CPU cores:</span>
+                          <span className="ml-1">{expandedSysInfo.cpus}</span>
+                        </div>
+                      )}
+                      {expandedSysInfo.disks && (
+                        <div>
+                          <p className="text-slate-500 font-medium mb-1">Disk space (Used / Free):</p>
+                          <pre className="bg-slate-800 p-2 rounded text-[10px] overflow-x-auto max-h-32 scroll-thin">{expandedSysInfo.disks}</pre>
+                        </div>
+                      )}
+                      {expandedSysInfo.network && (
+                        <div>
+                          <p className="text-slate-500 font-medium mb-1">Network adapters (IP addresses):</p>
+                          <pre className="bg-slate-800 p-2 rounded text-[10px] overflow-x-auto max-h-32 scroll-thin">{expandedSysInfo.network}</pre>
+                        </div>
+                      )}
+                      {expandedSysInfo.installed_software && (
+                        <div>
+                          <p className="text-slate-500 font-medium mb-1">Installed programs:</p>
+                          <pre className="bg-slate-800 p-2 rounded text-[10px] overflow-y-auto max-h-48 scroll-thin">{expandedSysInfo.installed_software}</pre>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -997,31 +1022,31 @@ export function SessionView({
 
             {activeTab === 'tasks' && (
               <div className="flex flex-col h-full">
-                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 shrink-0">
                   <span className="text-xs text-slate-400">Processes ({processList.length})</span>
                   <Button size="sm" variant="ghost" className="h-6 px-2 text-slate-400" onClick={refreshProcesses}>
                     <RefreshCw className="w-3.5 h-3.5" />
                   </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-auto scroll-thin">
                   {processList.length === 0 ? (
                     <p className="text-slate-500 text-xs text-center py-4">Click refresh to list processes.</p>
                   ) : (
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-slate-900">
+                    <table className="w-full text-xs table-fixed">
+                      <thead className="sticky top-0 bg-slate-900 z-10">
                         <tr className="text-slate-500 text-left">
-                          <th className="px-2 py-1">PID</th>
-                          <th className="px-2 py-1">Name</th>
-                          <th className="px-2 py-1 text-right">CPU</th>
-                          <th className="px-2 py-1 text-right">Mem</th>
-                          <th className="px-2 py-1"></th>
+                          <th className="px-2 py-1 w-12">PID</th>
+                          <th className="px-2 py-1 truncate">Name</th>
+                          <th className="px-2 py-1 text-right w-12">CPU</th>
+                          <th className="px-2 py-1 text-right w-16">Mem</th>
+                          <th className="px-1 py-1 w-8"></th>
                         </tr>
                       </thead>
                       <tbody>
                         {processList.map((p) => (
                           <tr key={p.pid} className="border-t border-slate-800 hover:bg-slate-800">
-                            <td className="px-2 py-1 text-slate-400 font-mono">{p.pid}</td>
-                            <td className="px-2 py-1 text-slate-200 truncate max-w-32">{p.name}</td>
+                            <td className="px-2 py-1 text-slate-400 font-mono truncate">{p.pid}</td>
+                            <td className="px-2 py-1 text-slate-200 truncate" title={p.name}>{p.name}</td>
                             <td className="px-2 py-1 text-right text-slate-400">{p.cpu}</td>
                             <td className="px-2 py-1 text-right text-slate-400">{p.memory}</td>
                             <td className="px-1 py-1">

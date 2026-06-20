@@ -230,7 +230,7 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">1</div>
-                  <h4 className="font-semibold text-slate-900">Pick your computer type and click to download</h4>
+                  <h4 className="font-semibold text-slate-900">Click your computer type below to download</h4>
                 </div>
 
                 <div className="grid sm:grid-cols-3 gap-3">
@@ -298,32 +298,6 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
                   </button>
                 </div>
 
-                {/* Chromebook / browser-only fallback */}
-                <div className="mt-3 p-4 rounded-lg bg-amber-50 border border-amber-200">
-                  <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <MonitorIcon className="w-5 h-5 text-amber-700" />
-                      <div>
-                        <p className="font-semibold text-slate-900 text-sm">Using a Chromebook?</p>
-                        <p className="text-xs text-slate-600">Share your screen directly from the browser — no download needed. View-only (no remote control).</p>
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="bg-amber-600 hover:bg-amber-700 text-white"
-                      onClick={() => {
-                        // Redirect to the browser-based screen share
-                        window.location.hash = `#browser-share/${code.toUpperCase()}${name ? '/' + encodeURIComponent(name) : ''}`
-                        // Reload to trigger the hash handler
-                        window.location.reload()
-                      }}
-                    >
-                      <MonitorIcon className="w-4 h-4 mr-1" />
-                      Share from browser
-                    </Button>
-                  </div>
-                </div>
-
                 {downloadStarted && (
                   <div className="mt-3 p-3 bg-[#1B3A6B]/5 border border-[#1B3A6B]/20 rounded-lg flex items-center gap-2 text-sm text-slate-700">
                     <Check className="w-4 h-4 text-[#1B3A6B] shrink-0" />
@@ -344,29 +318,38 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">2</div>
-                  <h4 className="font-semibold text-slate-900">Open the downloaded file</h4>
+                  <h4 className="font-semibold text-slate-900">Open the file you just downloaded</h4>
                 </div>
-                <BrowserInstructions browser={browser} os={os} code={code} />
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <p className="text-sm text-slate-700">
+                    <strong>Look at the top-right of your browser.</strong> You&apos;ll see the downloaded file.
+                    Click it to open it.
+                  </p>
+                  {os === 'windows' && (
+                    <p className="text-sm text-slate-700 mt-2">
+                      If a blue screen says &quot;Windows protected your PC&quot;:
+                      click <strong>&quot;More info&quot;</strong> at the bottom, then click <strong>&quot;Run anyway&quot;</strong>.
+                    </p>
+                  )}
+                  {os === 'mac' && (
+                    <p className="text-sm text-slate-700 mt-2">
+                      On Mac: right-click (or Control-click) the file and choose <strong>&quot;Open&quot;</strong>, then confirm.
+                    </p>
+                  )}
+                </div>
               </div>
 
-              {/* Step 3: what happens next */}
+              {/* Step 3: done */}
               <div>
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">3</div>
-                  <h4 className="font-semibold text-slate-900">That&apos;s it! Your session starts automatically.</h4>
+                  <h4 className="font-semibold text-slate-900">That&apos;s it! Your technician will appear shortly.</h4>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                  <div className="flex items-start gap-3">
-                    <PlayCircle className="w-5 h-5 text-[#1B3A6B] shrink-0 mt-0.5" />
-                    <div className="text-sm text-slate-700 space-y-1.5">
-                      <p>When you open the file:</p>
-                      <ul className="list-disc list-inside space-y-1 ml-2">
-                        <li>It connects to your technician using code <span className="font-mono font-bold text-[#1B3A6B]">{code.toUpperCase()}</span></li>
-                        {name && <li>Your name <strong>&ldquo;{name}&rdquo;</strong> is sent automatically</li>}
-                        <li>The session runs quietly in the background</li>
-                      </ul>
-                    </div>
-                  </div>
+                  <p className="text-sm text-slate-700">
+                    The program runs quietly in the background. Your technician can now see your screen and help you.
+                    You don&apos;t need to do anything else.
+                  </p>
                 </div>
               </div>
 

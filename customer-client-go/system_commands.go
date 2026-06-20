@@ -11,6 +11,7 @@ import (
         "os/exec"
         "runtime"
         "strings"
+        "syscall"
         "time"
 
         "github.com/kbinani/screenshot"
@@ -147,7 +148,7 @@ func setClipboard(text string) {
 func getClipboard() string {
         switch runtime.GOOS {
         case "windows":
-                out, _ := exec.Command("powershell", "-command", "Get-Clipboard").Output()
+                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command", "Get-Clipboard").Output()
                 return strings.TrimSpace(string(out))
         case "darwin":
                 out, _ := exec.Command("pbpaste").Output()
@@ -213,22 +214,14 @@ func sendCtrlAltDel() {
 // --- Remote command execution ---
 
 func execRemoteCommand(command string) string {
-        var cmd *exec.Cmd
-        switch runtime.GOOS {
-        case "windows":
-                cmd = exec.Command("cmd", "/c", command)
-        default:
-                cmd = exec.Command("sh", "-c", command)
-        }
         var stdout, stderr bytes.Buffer
-        cmd.Stdout = &stdout
-        cmd.Stderr = &stderr
-        // Set a 30s timeout via context
         ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
         defer cancel()
-        cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+        var cmd *exec.Cmd
         if runtime.GOOS == "windows" {
                 cmd = exec.CommandContext(ctx, "cmd", "/c", command)
+                cmd.SysProcAttr = &syscall.SysProcAttr{}
+                hideWindow(cmd.SysProcAttr)
         } else {
                 cmd = exec.CommandContext(ctx, "sh", "-c", command)
         }
@@ -258,7 +251,7 @@ func listProcesses() []ProcessInfo {
         var procs []ProcessInfo
         switch runtime.GOOS {
         case "windows":
-                out, _ := exec.Command("powershell", "-command",
+                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
                         "Get-Process | Sort-Object -Property WS -Descending | Select-Object -First 50 Id, ProcessName, CPU, @{N='Mem';E={[math]::Round($_.WS/1MB,1)}} | Format-Table -AutoSize").Output()
                 // Parse the output
                 lines := strings.Split(string(out), "\n")
@@ -370,7 +363,7 @@ func getExpandedSysInfo() map[string]interface{} {
 
         // Installed software (Windows)
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-command",
+                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
                         "Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | "+
                                 "Select-Object DisplayName, DisplayVersion | "+
                                 "Where-Object { $_.DisplayName -ne $null } | "+
@@ -380,7 +373,7 @@ func getExpandedSysInfo() map[string]interface{} {
 
         // Disk space
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-command",
+                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
                         "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}} | Format-Table -AutoSize").Output()
                 info["disks"] = string(out)
         } else {
@@ -390,7 +383,7 @@ func getExpandedSysInfo() map[string]interface{} {
 
         // Network interfaces
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-command",
+                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
                         "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' } | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize").Output()
                 info["network"] = string(out)
         } else {
@@ -400,11 +393,12 @@ func getExpandedSysInfo() map[string]interface{} {
 
         // Uptime
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-command",
-                        "(Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime").Output()
+                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
+                        "$u = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime; "+
+                                "Write-Output ($u.Days.ToString() + 'd ' + $u.Hours.ToString() + 'h ' + $u.Minutes.ToString() + 'm')").Output()
                 info["uptime"] = strings.TrimSpace(string(out))
         } else {
-                out, _ := exec.Command("uptime").Output()
+                out, _ := exec.Command("uptime", "-p").Output()
                 info["uptime"] = strings.TrimSpace(string(out))
         }
 

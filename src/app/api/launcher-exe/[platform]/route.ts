@@ -4,14 +4,19 @@ import { existsSync } from 'fs'
 // ===========================================================================
 // GET /api/launcher-exe/[platform]?code=ABC123&name=Margaret
 // ===========================================================================
-// Serves the customer client binary DIRECTLY, renamed to include the
-// session code in the filename. The client binary reads the code from its
-// own filename on startup — no launcher, no second download, no config file.
+// Serves the customer client binary with the session code + server URL
+// embedded as a trailer at the end of the file. The Go client reads this
+// trailer on startup — no filename parsing needed, no session.json needed.
 //
-// Windows: serves marqueeit-client-windows.exe as "marqueeit-AHC6E.exe"
-// Mac:     serves marqueeit-client-mac as "marqueeit-AHC6E"
-// Linux:   serves marqueeit-client-linux as "marqueeit-AHC6E"
+// The trailer format is:
+//   MARQUEEIT_CONFIG{"code":"ABC123","name":"Margaret","server":"https://..."}\n
+//
+// Go binaries ignore extra data appended after the executable, so this is
+// safe and doesn't break the binary.
 // ===========================================================================
+
+const TRAILER_PREFIX = 'MARQUEEIT_CONFIG'
+const TRAILER_SUFFIX = '\n'
 
 export async function GET(
   req: NextRequest,
@@ -26,23 +31,37 @@ export async function GET(
     return NextResponse.json({ error: 'Invalid code' }, { status: 400 })
   }
 
-  const safeCode = code.replace(/[^A-Z0-9]/g, '').slice(0, 8)
+  // Determine the public server URL
+  const publicUrl = process.env.PUBLIC_URL
+  let origin: string
+  if (publicUrl) {
+    origin = publicUrl.replace(/\/+$/, '')
+  } else {
+    const forwardedProto = req.headers.get('x-forwarded-proto') || 'https'
+    const forwardedHost = req.headers.get('x-forwarded-host')
+    const host = req.headers.get('host')
+    const realHost = forwardedHost || host || url.host
+    origin = `${forwardedProto}://${realHost}`
+  }
 
-  // Map platform to the pre-built binary path + download filename
+  const safeCode = code.replace(/[^A-Z0-9]/g, '').slice(0, 8)
+  const safeName = name.replace(/[^a-zA-Z0-9 \-']/g, '').slice(0, 50)
+
+  // Map platform to the pre-built binary path
   const platformMap: Record<string, { srcPath: string; fileName: string; contentType: string }> = {
     windows: {
       srcPath: '/downloads/marqueeit-client-windows.exe',
-      fileName: `marqueeit-${safeCode}.exe`,
+      fileName: 'marqueeit-client.exe',
       contentType: 'application/vnd.microsoft.portable-executable',
     },
     mac: {
       srcPath: '/downloads/marqueeit-client-mac',
-      fileName: `marqueeit-${safeCode}`,
+      fileName: 'marqueeit-client',
       contentType: 'application/octet-stream',
     },
     linux: {
       srcPath: '/downloads/marqueeit-client-linux',
-      fileName: `marqueeit-${safeCode}`,
+      fileName: 'marqueeit-client',
       contentType: 'application/octet-stream',
     },
   }
@@ -58,9 +77,21 @@ export async function GET(
   }
 
   const fs = await import('fs/promises')
-  const data = await fs.readFile(fullPath)
+  const binaryData = await fs.readFile(fullPath)
 
-  return new NextResponse(data, {
+  // Build the config trailer
+  const config = JSON.stringify({
+    code: safeCode,
+    name: safeName,
+    server: origin,
+  })
+  const trailer = `${TRAILER_PREFIX}${config}${TRAILER_SUFFIX}`
+  const trailerBuffer = Buffer.from(trailer, 'utf-8')
+
+  // Append the trailer to the binary
+  const combined = Buffer.concat([binaryData, trailerBuffer])
+
+  return new NextResponse(combined, {
     headers: {
       'Content-Type': platformConfig.contentType,
       'Content-Disposition': `attachment; filename="${platformConfig.fileName}"`,
@@ -68,3 +99,4 @@ export async function GET(
     },
   })
 }
+
