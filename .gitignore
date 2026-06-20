@@ -52,3 +52,38 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Go build artifacts
+customer-client-go/marqueeit-client
+customer-client-go/marqueeit-client-*
+customer-client-go/.remotehelp_venv
+
+# Generated downloads (built in Docker)
+/download/
+
+# Go workspace
+/home/z/go/
+/home/z/gopath/
+
+# Old Python client (deprecated)
+/public/downloads/remotehelp_client.py
+/public/downloads/install_windows.bat
+/public/downloads/install_mac_linux.sh
+
+# Upload folder
+/upload/
+
+# Tool results
+tool-results/
+
+# Worklog (local dev notes)
+worklog.mddb/*.db
+db/*.db-journal
+
+# Database
+db/*.db
+db/*.db-journal
+
+# Pre-built binaries (built in Docker)
+public/downloads/marqueeit-client-*
+public/downloads/marqueeit-launcher-*
