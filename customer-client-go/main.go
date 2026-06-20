@@ -291,7 +291,8 @@ func (c *Client) readLoop() {
                                                 "lock-screen", "unlock-screen", "send-cad", "exec-command",
                                                 "list-processes", "kill-process", "list-monitors", "switch-monitor",
                                                 "set-quality", "get-sysinfo", "reboot",
-                                                "recording-start", "recording-stop":
+                                                "recording-start", "recording-stop",
+                                                "install-unattended":
                                                 HandleSystemCommand(sysMsg)
                                         }
                                 }

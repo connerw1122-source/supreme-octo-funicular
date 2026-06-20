@@ -108,6 +108,22 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 sendJSON(map[string]interface{}{"type": "recording-ack", "recording": true})
         case "recording-stop":
                 sendJSON(map[string]interface{}{"type": "recording-ack", "recording": false})
+
+        // --- Install as unattended service (during active session) ---
+        case "install-unattended":
+                serverURL, _ := msg["server"].(string)
+                if serverURL == "" {
+                        serverURL = globalClient.serverURL
+                }
+                err := installService("", serverURL)
+                result := "installed"
+                if err != nil {
+                        result = "error: " + err.Error()
+                }
+                sendJSON(map[string]interface{}{
+                        "type":   "unattended-result",
+                        "result": result,
+                })
         }
 }
 

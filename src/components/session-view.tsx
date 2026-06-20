@@ -251,6 +251,13 @@ export function SessionView({
           case 'sysinfo':
             setExpandedSysInfo(msg.details || {})
             break
+          case 'unattended-result':
+            if (msg.result && !msg.result.startsWith('error')) {
+              toast.success('Unattended access installed! You can now reconnect anytime from the dashboard.')
+            } else {
+              toast.error('Failed to install unattended access: ' + (msg.result || 'unknown error'))
+            }
+            break
         }
       } catch (err) {
         console.error('ws message parse error', err)
@@ -449,6 +456,12 @@ export function SessionView({
     if (!confirm('Reboot the customer\'s machine? They will disconnect temporarily.')) return
     sendSystemCommand({ type: 'reboot' })
     toast.success('Reboot command sent')
+  }, [sendSystemCommand])
+
+  const installUnattended = useCallback(() => {
+    if (!confirm('Install unattended access on this machine? This will set up the MarqueeIT client to start on boot, so you can reconnect without the customer being present.')) return
+    toast.info('Installing unattended access...')
+    sendSystemCommand({ type: 'install-unattended' })
   }, [sendSystemCommand])
 
   const handleStageClick = (e: React.MouseEvent) => {
@@ -840,6 +853,9 @@ export function SessionView({
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={getExpandedInfo} title="Get system info">
                 <Cpu className="w-3.5 h-3.5" />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
+                <MonitorSmartphone className="w-3.5 h-3.5" />
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-red-400 hover:text-red-300" onClick={rebootCustomer} title="Reboot customer machine">
                 <Power className="w-3.5 h-3.5" />

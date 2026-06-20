@@ -6,20 +6,47 @@ package main
 // technician.
 
 import (
+        "bytes"
+        "encoding/json"
         "fmt"
         "log"
+        "net/http"
         "os"
         "os/exec"
         "path/filepath"
         "runtime"
+        "time"
 )
 
 // installService installs the current binary as a system service that starts
 // on boot. The service runs in unattended mode with the given machine code.
+// If machineCode is empty, a random one is generated.
 func installService(machineCode, serverURL string) error {
         exe, err := os.Executable()
         if err != nil {
                 return fmt.Errorf("cannot find executable: %w", err)
+        }
+
+        // Generate a machine code if not provided
+        if machineCode == "" {
+                machineCode = generateMachineCode()
+                // Register with the server
+                registerURL := fmt.Sprintf("%s/api/unattended", serverURL)
+                body, _ := json.Marshal(map[string]string{
+                        "customerName": hostname(),
+                })
+                resp, err := http.Post(registerURL, "application/json", bytes.NewReader(body))
+                if err != nil {
+                        return fmt.Errorf("failed to register with server: %w", err)
+                }
+                var result struct {
+                        MachineCode string `json:"machineCode"`
+                }
+                json.NewDecoder(resp.Body).Decode(&result)
+                resp.Body.Close()
+                if result.MachineCode != "" {
+                        machineCode = result.MachineCode
+                }
         }
 
         switch runtime.GOOS {
@@ -32,6 +59,16 @@ func installService(machineCode, serverURL string) error {
         default:
                 return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
         }
+}
+
+func generateMachineCode() string {
+        const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        b := make([]byte, 8)
+        for i := range b {
+                b[i] = alphabet[time.Now().UnixNano()%int64(len(alphabet))]
+                time.Sleep(time.Nanosecond)
+        }
+        return string(b)
 }
 
 // uninstallService removes the system service.
