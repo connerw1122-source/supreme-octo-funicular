@@ -45,6 +45,18 @@ static int sendKey(WORD vk, int down) {
     return SendInput(1, &input, sizeof(INPUT));
 }
 
+// Send a key event with extra flags (e.g. KEYEVENTF_EXTENDEDKEY for arrows)
+static int sendKeyEx(WORD vk, int down, DWORD extraFlags) {
+    INPUT input;
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = vk;
+    input.ki.wScan = 0;
+    input.ki.dwFlags = (down ? 0 : KEYEVENTF_KEYUP) | extraFlags;
+    input.ki.time = 0;
+    input.ki.dwExtraInfo = 0;
+    return SendInput(1, &input, sizeof(INPUT));
+}
+
 // Send a unicode character via SendInput
 static int sendUnicodeChar(wchar_t ch, int down) {
     INPUT input;
@@ -64,6 +76,13 @@ static int screenWidth() {
 static int screenHeight() {
     return GetSystemMetrics(SM_CYSCREEN);
 }
+
+// Create a message queue. SendInput silently fails without one on some
+// Windows versions (e.g. Windows 11 24H2+ when launched without a console).
+static void ensureMessageQueue() {
+    MSG msg;
+    PeekMessage(&msg, NULL, 0, 0, PM_NOREMOVE);
+}
 */
 import "C"
 
@@ -71,6 +90,11 @@ import (
         "strings"
         "unicode"
 )
+
+// init ensures a message queue exists before any input functions are called.
+func init() {
+        C.ensureMessageQueue()
+}
 
 // Map browser KeyboardEvent.code to Windows virtual key codes
 var vkMap = map[string]C.WORD{
@@ -109,6 +133,17 @@ var vkMap = map[string]C.WORD{
         "F12":          0x7B,
 }
 
+// Keys that require KEYEVENTF_EXTENDEDKEY flag on Windows
+func isExtended(code string) bool {
+        switch code {
+        case "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+                "Delete", "Home", "End", "PageUp", "PageDown",
+                "Insert":
+                return true
+        }
+        return false
+}
+
 func vkFor(code string) C.WORD {
         if vk, ok := vkMap[code]; ok {
                 return vk
@@ -141,8 +176,6 @@ func vkFor(code string) C.WORD {
 }
 
 func mouseMove(relX, relY float64) {
-        w := int(C.screenWidth())
-        h := int(C.screenHeight())
         // Convert relative [0..1] to absolute [0..65535]
         ax := int(relX * 65535.0)
         ay := int(relY * 65535.0)
@@ -200,7 +233,11 @@ func keyDown(code string) {
         if vk == 0 {
                 return
         }
-        C.sendKey(vk, 1)
+        if isExtended(code) {
+                C.sendKeyEx(vk, 1, C.KEYEVENTF_EXTENDEDKEY)
+        } else {
+                C.sendKey(vk, 1)
+        }
 }
 
 func keyUp(code string) {
@@ -208,7 +245,11 @@ func keyUp(code string) {
         if vk == 0 {
                 return
         }
-        C.sendKey(vk, 0)
+        if isExtended(code) {
+                C.sendKeyEx(vk, 0, C.KEYEVENTF_EXTENDEDKEY)
+        } else {
+                C.sendKey(vk, 0)
+        }
 }
 
 func keyPress(code string) {
