@@ -329,7 +329,7 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
                     <Check className="w-4 h-4 text-[#1B3A6B] shrink-0" />
                     <span>
                       {downloadStarted === 'windows' ? (
-                        <>File downloaded! <strong>Double-click marqueeit-{code.toUpperCase()}.exe</strong> to start your session. It will download the client automatically and connect.</>
+                        <>File downloaded! <strong>Double-click marqueeit-{code.toUpperCase()}.exe</strong> to start your session.</>
                       ) : (
                         <>Script downloaded! See instructions below to run it.</>
                       )}
@@ -435,7 +435,7 @@ function ChromeInstructions({ os, fileName }: { os: OS; fileName: string }) {
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
         <span>
-          {os === 'windows' && <>If Windows says "protected your PC", click <strong>"More info"</strong> then <strong>"Run anyway"</strong>. The .exe downloads the client automatically and connects.</>}
+          {os === 'windows' && <>If Windows says "protected your PC", click <strong>"More info"</strong> then <strong>"Run anyway"</strong>. The .exe connects to your technician automatically.</>}
           {os === 'mac' && <>Open a terminal, run <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></>}
           {os === 'linux' && <>Open a terminal, run <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></>}
           {!['windows', 'mac', 'linux'].includes(os) && <>Click to open the file.</>}

@@ -2,26 +2,21 @@
 # MarqueeIT - Next.js App Dockerfile
 # ===========================================================================
 # Multi-stage build:
-#   1. Go builder: cross-compiles 5 binaries:
+#   1. Go builder: cross-compiles 4 binaries:
 #      - marqueeit-client-linux (X11 input injection via CGO)
 #      - marqueeit-client-linux-wayland (Wayland, view-only input)
 #      - marqueeit-client-windows.exe (SendInput via MinGW CGO, no console)
 #      - marqueeit-client-mac (view-only, input stubbed)
-#      - marqueeit-launcher-windows.exe (tiny launcher that reads code from
-#        its own filename)
 #   2. Next.js builder: compiles the standalone Next.js app
 #   3. Runtime: minimal Node image with the standalone build + binaries
 # ===========================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Build the Go customer client binaries + launcher
+# Stage 1: Build the Go customer client binaries
 # ---------------------------------------------------------------------------
 FROM golang:1.23-bookworm AS go-builder
 
 WORKDIR /src
-
-# Build arg for the server URL embedded in the launcher
-ARG MARQUEEIT_SERVER_URL=https://support.wizardyoda.com
 
 # Install system dependencies for CGo cross-compilation:
 #   libx11-dev     — X11 client library headers (Linux X11 build)
@@ -57,15 +52,7 @@ RUN mkdir -p /out && \
         go build -ldflags="-s -w -H windowsgui -extldflags=-static -linkmode external" \
         -o /out/marqueeit-client-windows.exe . && \
     # 4. macOS (CGO disabled, input stubbed)
-    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-mac . && \
-    # 5. Windows launcher (pure Go, reads session code from filename)
-    #    The server URL is embedded at build time. Override with:
-    #    docker build --build-arg MARQUEEIT_SERVER_URL=https://your-domain.com
-    cd launcher && \
-    MARQUEEIT_SERVER_URL="${MARQUEEIT_SERVER_URL:-https://support.wizardyoda.com}" && \
-    CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-        go build -ldflags="-s -w -H windowsgui -X main.serverURL=$MARQUEEIT_SERVER_URL" \
-        -o /out/marqueeit-launcher-windows.exe .
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-mac .
 
 # ---------------------------------------------------------------------------
 # Stage 2: Build the Next.js standalone app
@@ -97,7 +84,6 @@ COPY --from=go-builder /out/marqueeit-client-linux ./public/downloads/marqueeit-
 COPY --from=go-builder /out/marqueeit-client-linux-wayland ./public/downloads/marqueeit-client-linux-wayland
 COPY --from=go-builder /out/marqueeit-client-windows.exe ./public/downloads/marqueeit-client-windows.exe
 COPY --from=go-builder /out/marqueeit-client-mac ./public/downloads/marqueeit-client-mac
-COPY --from=go-builder /out/marqueeit-launcher-windows.exe ./public/downloads/marqueeit-launcher-windows.exe
 
 # Build the standalone Next.js app
 RUN bun run build

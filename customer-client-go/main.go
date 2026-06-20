@@ -459,11 +459,11 @@ func main() {
                 return
         }
 
-        // Try to read session.json from the binary's directory.
-        // This is the no-command-line-args path: the customer downloads a zip
-        // with the binary + session.json, double-clicks the binary, and it
-        // reads the config automatically.
+        // Try to read session config from session.json OR from the binary's
+        // own filename. The customer downloads "marqueeit-AHC6E.exe" and
+        // double-clicks it — the code is extracted from the filename.
         if code == "" && name == "" && unattended == "" {
+                // First try session.json
                 if config := readSessionConfig(); config != nil {
                         if code == "" {
                                 code = config.Code
@@ -475,6 +475,13 @@ func main() {
                                 server = config.Server
                         }
                         log.Printf("Loaded session config: code=%s server=%s", code, server)
+                }
+                // Then try extracting from the binary's filename
+                if code == "" {
+                        if fc := extractCodeFromFilename(); fc != "" {
+                                code = fc
+                                log.Printf("Extracted code from filename: %s", code)
+                        }
                 }
         }
 
@@ -549,6 +556,36 @@ func readSessionConfig() *SessionConfig {
                 return nil
         }
         return &config
+}
+
+// extractCodeFromFilename reads the session code from the binary's own
+// filename. e.g. "marqueeit-AHC6E.exe" -> "AHC6E".
+// This lets the customer download a single .exe with the code baked into
+// the filename — no launcher, no second download, no config file.
+func extractCodeFromFilename() string {
+        exe, err := os.Executable()
+        if err != nil {
+                return ""
+        }
+        base := filepath.Base(exe)
+        name := strings.TrimSuffix(base, filepath.Ext(base))
+        parts := strings.Split(name, "-")
+        for i := len(parts) - 1; i >= 0; i-- {
+                p := strings.TrimSpace(parts[i])
+                if len(p) >= 4 && len(p) <= 8 && isAllUpperAlnum(p) {
+                        return p
+                }
+        }
+        return ""
+}
+
+func isAllUpperAlnum(s string) bool {
+        for _, c := range s {
+                if !((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+                        return false
+                }
+        }
+        return true
 }
 
 func handleSignals(cancel context.CancelFunc) {
