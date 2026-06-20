@@ -134,7 +134,7 @@ export function TechnicianConsole({
           <div className="h-full overflow-y-auto bg-slate-50">
             <TechnicianDashboard
               technicianName={technicianName}
-              onBack={() => setShowDashboard(false)}
+              onBack={() => { if (activeSession) setShowDashboard(false) }}
               onLogout={onLogout}
               onJoinSession={handleJoinSession}
             />

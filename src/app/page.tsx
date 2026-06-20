@@ -20,7 +20,6 @@ interface SessionTab {
 type View =
   | { name: 'landing' }
   | { name: 'login' }
-  | { name: 'technician'; technicianName: string }
   | { name: 'customer-download'; code: string; customerName: string }
   | {
       name: 'technician-console'
@@ -40,7 +39,12 @@ function getInitialView(): View {
   }
   const session = getSession()
   if (session) {
-    return { name: 'technician', technicianName: session.username }
+    return {
+      name: 'technician-console',
+      technicianName: session.username,
+      activeSession: null,
+      openSessions: [],
+    }
   }
   return { name: 'landing' }
 }
@@ -153,20 +157,12 @@ export default function Home() {
 
   return (
     <>
-      <Toaster position="bottom-left" richColors closeButton toastOptions={{ style: { marginBottom: '60px' } }} />
+      <Toaster position="top-center" richColors closeButton toastOptions={{ style: { marginTop: '8px' } }} />
       {view.name === 'landing' && (
         <LandingView onCustomer={handleCustomer} onTechnicianLogin={handleTechnicianLogin} />
       )}
       {view.name === 'login' && (
         <LoginView onBack={handleLoginBack} onSuccess={handleLoginSuccess} />
-      )}
-      {view.name === 'technician' && (
-        <TechnicianDashboard
-          technicianName={view.technicianName}
-          onBack={handleBackToLanding}
-          onLogout={handleLogout}
-          onJoinSession={handleOpenSession}
-        />
       )}
       {view.name === 'customer-download' && (
         <CustomerDownload code={view.code} name={view.customerName} onBack={handleBackToLanding} />

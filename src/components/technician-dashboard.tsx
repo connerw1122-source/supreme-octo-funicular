@@ -233,6 +233,18 @@ export function TechnicianDashboard({
     toast.success('Unattended installer link copied')
   }
 
+  const deleteMachine = async (id: string, name: string) => {
+    if (!confirm(`Remove "${name}" from unattended machines?`)) return
+    try {
+      const res = await fetch(`/api/unattended/${id}/delete`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete')
+      toast.success('Machine removed')
+      fetchMachines()
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to remove machine')
+    }
+  }
+
   const statusBadge = (status: string) => {
     if (status === 'waiting') return <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">Waiting</Badge>
     if (status === 'active') return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Active</Badge>
@@ -259,7 +271,7 @@ export function TechnicianDashboard({
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="h-full bg-slate-50">
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -519,7 +531,7 @@ export function TechnicianDashboard({
                                   variant="outline"
                                   size="sm"
                                   onClick={() => copySetupInstallerLink(m.machineCode)}
-                                  title="Copy installer link (for re-installing)"
+                                  title="Copy installer link"
                                 >
                                   <Copy className="w-3.5 h-3.5 mr-1" />
                                   Link
@@ -532,6 +544,15 @@ export function TechnicianDashboard({
                                 >
                                   <MousePointer2 className="w-3.5 h-3.5 mr-1" />
                                   Connect
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => deleteMachine(m.id, m.customerName)}
+                                  className="text-red-500 hover:text-red-700 hover:bg-red-50"
+                                  title="Remove machine"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </Button>
                               </div>
                             </TableCell>
