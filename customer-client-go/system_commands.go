@@ -24,7 +24,11 @@ import (
 // Called from readLoop when a message with type != "input-event" arrives.
 func HandleSystemCommand(msg map[string]interface{}) {
         cmdType, _ := msg["type"].(string)
-        switch cmdType {
+
+        // Run ALL system commands in a goroutine so they never block the
+        // read loop (which would freeze remote control input).
+        go func() {
+                switch cmdType {
 
         // --- Clipboard sync ---
         case "clipboard-set":
@@ -146,13 +150,19 @@ func HandleSystemCommand(msg map[string]interface{}) {
         // --- Elevate session (restart client as admin) ---
         case "elevate-session":
                 exe, _ := os.Executable()
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -ArgumentList '-code','%s','-server','%s' -Verb RunAs`, exe, globalClient.code, globalClient.serverURL)
+                // Restart with the same code and server
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -ArgumentList '-code','%s','-name','%s','-server','%s' -Verb RunAs`, exe, globalClient.code, globalClient.name, globalClient.serverURL)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
-                cmd.Start()
+                err := cmd.Start()
+                if err != nil {
+                        sendJSON(map[string]interface{}{"type": "elevate-result", "result": "error: " + err.Error()})
+                        return
+                }
                 sendJSON(map[string]interface{}{"type": "elevate-result", "result": "restarting"})
-                time.Sleep(1 * time.Second)
+                // Wait a moment for the new process to start, then shut down
+                time.Sleep(2 * time.Second)
                 globalClient.shutdown()
 
         // --- Remove unattended service ---
@@ -212,6 +222,7 @@ echo DONE
                         "machineCode": machineCode,
                 })
         }
+        }() // end goroutine
 }
 
 // sendJSON sends a JSON message to the technician via the active WebSocket.

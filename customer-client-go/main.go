@@ -278,8 +278,8 @@ func (c *Client) readLoop() {
                         }
                 case "chat", "chat-message":
                         c.Log("[chat] %s: %s", envelope.Sender, envelope.Content)
-                        // Deliver to the floating chat window
-                        deliverChatMessage(envelope.Sender, envelope.Content)
+                        // Show in the on-screen overlay window (no browser)
+                        showChatOverlay(envelope.Sender, envelope.Content)
                 case "session-ended", "end-session":
                         c.Log("Session ended by technician")
                         c.shutdown()
