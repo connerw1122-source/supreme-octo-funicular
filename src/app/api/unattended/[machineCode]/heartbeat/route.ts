@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 // POST /api/unattended/[machineCode]/heartbeat
-// Called periodically by the unattended client to mark itself online.
-// Optional body: { hostname?: string, os?: string }
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ machineCode: string }> }
@@ -28,18 +26,13 @@ export async function POST(
       },
     })
 
-    // Check if there's a pending session waiting for this machine
     const pendingSession = await db.session.findFirst({
-      where: {
-        unattendedMachineId: machine.id,
-        status: 'waiting',
-      },
+      where: { unattendedMachineId: machine.id, status: 'waiting' },
       orderBy: { createdAt: 'desc' },
     })
 
     return NextResponse.json({
       ok: true,
-      // If a technician asked to connect, the client should auto-join that session
       pendingSessionCode: pendingSession?.code ?? null,
       pendingSessionId: pendingSession?.id ?? null,
     })

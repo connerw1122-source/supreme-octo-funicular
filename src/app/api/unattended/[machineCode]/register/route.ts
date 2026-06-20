@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
 // POST /api/unattended/[machineCode]/register
-// Called by the installer on the customer machine when it first runs.
-// Body: { hostname: string, os: string }
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ machineCode: string }> }
@@ -22,12 +20,7 @@ export async function POST(
 
     const updated = await db.unattendedMachine.update({
       where: { id: machine.id },
-      data: {
-        hostname,
-        os,
-        status: 'online',
-        lastSeenAt: new Date(),
-      },
+      data: { hostname, os, status: 'online', lastSeenAt: new Date() },
     })
 
     return NextResponse.json({

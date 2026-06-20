@@ -131,9 +131,7 @@ var globalClient *Client
 func setClipboard(text string) {
         switch runtime.GOOS {
         case "windows":
-                cmd := exec.Command("clip")
-                cmd.Stdin = strings.NewReader(text)
-                cmd.Run()
+                winSetClipboard(text)
         case "darwin":
                 cmd := exec.Command("pbcopy")
                 cmd.Stdin = strings.NewReader(text)
@@ -148,14 +146,13 @@ func setClipboard(text string) {
 func getClipboard() string {
         switch runtime.GOOS {
         case "windows":
-                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command", "Get-Clipboard").Output()
-                return strings.TrimSpace(string(out))
+                return winGetClipboard()
         case "darwin":
-                out, _ := exec.Command("pbpaste").Output()
-                return string(out)
+                out, _ := exec.Command("pbpaste")
+                return out
         case "linux":
-                out, _ := exec.Command("xclip", "-selection", "clipboard", "-o").Output()
-                return string(out)
+                out, _ := exec.Command("xclip", "-selection", "clipboard", "-o")
+                return out
         }
         return ""
 }
@@ -166,26 +163,32 @@ var inputLocked bool
 
 func lockInput(locked bool) {
         inputLocked = locked
-        // On Windows, we can use BlockInput API. On Linux, we grab the keyboard.
-        // For now this is a flag that the input handlers check.
+        switch runtime.GOOS {
+        case "windows":
+                winBlockInput(locked)
+        case "linux":
+                // On Linux X11, we can't easily block all input without grabbing
+                // the keyboard. For now this is a flag that the input handlers
+                // could check (though we don't currently).
+        }
 }
 
 // --- Lock screen (blank display) ---
 
 func lockScreen(lock bool) {
+        if !lock {
+                // Can't unlock the workstation remotely — the user needs to enter
+                // their PIN/password. This is by Windows design (security).
+                // The technician should just tell the customer to log back in.
+                return
+        }
         switch runtime.GOOS {
         case "windows":
-                if lock {
-                        exec.Command("cmd", "/c", "rundll32.exe", "user32.dll,LockWorkStation").Run()
-                }
+                winLockWorkStation()
         case "linux":
-                if lock {
-                        exec.Command("xdg-screensaver", "lock").Run()
-                }
+                exec.Command("xdg-screensaver", "lock").Run()
         case "darwin":
-                if lock {
-                        exec.Command("/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession", "-suspend").Run()
-                }
+                exec.Command("/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession", "-suspend").Run()
         }
 }
 
@@ -194,16 +197,13 @@ func lockScreen(lock bool) {
 func sendCtrlAltDel() {
         switch runtime.GOOS {
         case "windows":
-                // On Windows, SendInput can't send CAD directly (it requires SAS).
-                // We simulate it via the keyboard event sequence.
-                keyDown("ControlLeft")
-                keyDown("AltLeft")
-                keyDown("Delete")
-                keyUp("Delete")
-                keyUp("AltLeft")
-                keyUp("ControlLeft")
+                // Ctrl+Alt+Del is the Secure Attention Sequence (SAS) and cannot
+                // be simulated by SendInput on modern Windows. The only way to
+                // trigger it programmatically is via the SAS library (requires
+                // running as SYSTEM) or by sending a keyboard scan code sequence.
+                // We try the scan code approach which works on some Windows versions.
+                winSendCAD()
         case "linux":
-                // On Linux, CAD is handled by the init system. We can send it via:
                 exec.Command("dbus-send", "--system", "--print-reply",
                         "--dest=org.freedesktop.login1",
                         "/org/freedesktop/login1",
@@ -251,10 +251,10 @@ func listProcesses() []ProcessInfo {
         var procs []ProcessInfo
         switch runtime.GOOS {
         case "windows":
-                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
-                        "Get-Process | Sort-Object -Property WS -Descending | Select-Object -First 50 Id, ProcessName, CPU, @{N='Mem';E={[math]::Round($_.WS/1MB,1)}} | Format-Table -AutoSize").Output()
+                out, _ := winExecPowerShellHidden(
+                        "Get-Process | Sort-Object -Property WS -Descending | Select-Object -First 50 Id, ProcessName, CPU, @{N='Mem';E={[math]::Round($_.WS/1MB,1)}} | Format-Table -AutoSize")
                 // Parse the output
-                lines := strings.Split(string(out), "\n")
+                lines := strings.Split(out, "\n")
                 for _, line := range lines {
                         fields := strings.Fields(line)
                         if len(fields) >= 4 {
@@ -271,8 +271,8 @@ func listProcesses() []ProcessInfo {
                         }
                 }
         case "linux", "darwin":
-                out, _ := exec.Command("ps", "aux", "--sort=-rss").Output()
-                lines := strings.Split(string(out), "\n")
+                out, _ := exec.Command("ps", "aux", "--sort=-rss")
+                lines := strings.Split(out, "\n")
                 for i, line := range lines {
                         if i == 0 || line == "" {
                                 continue
@@ -363,43 +363,43 @@ func getExpandedSysInfo() map[string]interface{} {
 
         // Installed software (Windows)
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
+                out, _ := winExecPowerShellHidden(
                         "Get-ItemProperty HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\* | "+
                                 "Select-Object DisplayName, DisplayVersion | "+
                                 "Where-Object { $_.DisplayName -ne $null } | "+
-                                "Format-Table -AutoSize").Output()
-                info["installed_software"] = string(out)
+                                "Format-Table -AutoSize")
+                info["installed_software"] = out
         }
 
         // Disk space
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
-                        "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}} | Format-Table -AutoSize").Output()
-                info["disks"] = string(out)
+                out, _ := winExecPowerShellHidden(
+                        "Get-PSDrive -PSProvider FileSystem | Select-Object Name, @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}}, @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}} | Format-Table -AutoSize")
+                info["disks"] = out
         } else {
-                out, _ := exec.Command("df", "-h").Output()
-                info["disks"] = string(out)
+                out, _ := exec.Command("df", "-h")
+                info["disks"] = out
         }
 
         // Network interfaces
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
-                        "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' } | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize").Output()
-                info["network"] = string(out)
+                out, _ := winExecPowerShellHidden(
+                        "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -ne '127.0.0.1' } | Select-Object InterfaceAlias, IPAddress | Format-Table -AutoSize")
+                info["network"] = out
         } else {
-                out, _ := exec.Command("ip", "addr").Output()
-                info["network"] = string(out)
+                out, _ := exec.Command("ip", "addr")
+                info["network"] = out
         }
 
         // Uptime
         if runtime.GOOS == "windows" {
-                out, _ := exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-command",
+                out, _ := winExecPowerShellHidden(
                         "$u = (Get-Date) - (Get-CimInstance Win32_OperatingSystem).LastBootUpTime; "+
-                                "Write-Output ($u.Days.ToString() + 'd ' + $u.Hours.ToString() + 'h ' + $u.Minutes.ToString() + 'm')").Output()
-                info["uptime"] = strings.TrimSpace(string(out))
+                                "Write-Output ($u.Days.ToString() + 'd ' + $u.Hours.ToString() + 'h ' + $u.Minutes.ToString() + 'm')")
+                info["uptime"] = strings.TrimSpace(out)
         } else {
-                out, _ := exec.Command("uptime", "-p").Output()
-                info["uptime"] = strings.TrimSpace(string(out))
+                out, _ := exec.Command("uptime", "-p")
+                info["uptime"] = strings.TrimSpace(out)
         }
 
         return info

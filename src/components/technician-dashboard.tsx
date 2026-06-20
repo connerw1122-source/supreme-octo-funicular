@@ -233,10 +233,10 @@ export function TechnicianDashboard({
     toast.success('Unattended installer link copied')
   }
 
-  const deleteMachine = async (id: string, name: string) => {
+  const deleteMachine = async (machineCode: string, name: string) => {
     if (!confirm(`Remove "${name}" from unattended machines?`)) return
     try {
-      const res = await fetch(`/api/unattended/${id}/delete`, { method: 'DELETE' })
+      const res = await fetch(`/api/unattended/${machineCode}/delete`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete')
       toast.success('Machine removed')
       fetchMachines()
@@ -548,7 +548,7 @@ export function TechnicianDashboard({
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => deleteMachine(m.id, m.customerName)}
+                                  onClick={() => deleteMachine(m.machineCode, m.customerName)}
                                   className="text-red-500 hover:text-red-700 hover:bg-red-50"
                                   title="Remove machine"
                                 >
