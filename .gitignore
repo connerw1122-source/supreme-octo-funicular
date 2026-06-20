@@ -89,3 +89,6 @@ public/downloads/marqueeit-client-*
 public/downloads/marqueeit-launcher-*
 .env
 .zscripts/dev.pid
+DEPLOY.md
+worklog.md
+upload/

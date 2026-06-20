@@ -1,8 +1,9 @@
 // Simple credential-based auth for technicians.
+// Credentials are read from environment variables set in docker-compose.yml / .env
 // In a real deployment, swap this for NextAuth.js with proper password hashing.
 
-export const TECH_USERNAME = 'Yoda'
-export const TECH_PASSWORD = 'changeme'
+export const TECH_USERNAME = process.env.TECH_USERNAME || 'Yoda'
+export const TECH_PASSWORD = process.env.TECH_PASSWORD || 'changeme'
 
 const SESSION_KEY = 'marqueeit_session'
 const SESSION_TTL_MS = 1000 * 60 * 60 * 8 // 8 hours
