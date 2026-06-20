@@ -246,11 +246,19 @@ export function SessionView({
             }, ...prev].slice(0, 20))
             break
           case 'command-output':
-            setCmdOutput((prev) => [...prev, {
-              id: msg.id || Math.random().toString(36).slice(2),
-              command: msg.command || '',
-              output: msg.output || '',
-            }])
+            if (msg.final) {
+              // Final output — replace the '[running...]' entry with the real output
+              setCmdOutput((prev) => prev.map((c) =>
+                c.id === msg.id ? { ...c, output: msg.output || '' } : c
+              ))
+            } else {
+              // Initial '[running...]' — add as new entry
+              setCmdOutput((prev) => [...prev, {
+                id: msg.id || Math.random().toString(36).slice(2),
+                command: msg.command || '',
+                output: msg.output || '',
+              }])
+            }
             break
           case 'process-list':
             setProcessList(msg.processes || [])
@@ -1013,14 +1021,30 @@ export function SessionView({
 
             {activeTab === 'cmd' && (
               <div className="flex flex-col h-full">
+                {/* Quick actions */}
+                <div className="px-2 py-1.5 border-b border-slate-800 flex flex-wrap gap-1">
+                  <button onClick={() => { setCmdInput('eventvwr'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Event Viewer</button>
+                  <button onClick={() => { setCmdInput('taskmgr'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Task Manager</button>
+                  <button onClick={() => { setCmdInput('appwiz.cpl'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Programs</button>
+                  <button onClick={() => { setCmdInput('sysdm.cpl'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">System Props</button>
+                  <button onClick={() => { setCmdInput('ncpa.cpl'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Network</button>
+                  <button onClick={() => { setCmdInput('services.msc'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Services</button>
+                  <button onClick={() => { setCmdInput('diskmgmt.msc'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Disk Mgmt</button>
+                  <button onClick={() => { setCmdInput('devmgmt.msc'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Device Mgr</button>
+                  <button onClick={() => { setCmdInput('ipconfig /all'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">IP Config</button>
+                  <button onClick={() => { setCmdInput('systeminfo'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Sys Info</button>
+                  <button onClick={() => { setCmdInput('whoami /all'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Whoami</button>
+                  <button onClick={() => { setCmdInput('net user'); }} className="text-[10px] px-2 py-1 rounded bg-slate-800 text-slate-300 hover:bg-slate-700">Users</button>
+                </div>
+
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
                   {cmdOutput.length === 0 ? (
-                    <p className="text-slate-500 text-xs text-center py-4">Run a command on the customer&apos;s machine.</p>
+                    <p className="text-slate-500 text-xs text-center py-4">Run a command on the customer&apos;s machine. Click a quick action above or type below.</p>
                   ) : (
                     cmdOutput.map((c) => (
                       <div key={c.id} className="bg-slate-800 rounded p-2">
                         <p className="text-[#FFC425] text-xs font-mono mb-1">$ {c.command}</p>
-                        <pre className="text-slate-300 text-xs whitespace-pre-wrap break-all max-h-64 overflow-y-auto">{c.output || '(no output)'}</pre>
+                        <pre className="text-slate-300 text-xs whitespace-pre-wrap break-all max-h-64 overflow-y-auto scroll-thin">{c.output || '(waiting for output...)'}</pre>
                       </div>
                     ))
                   )}
