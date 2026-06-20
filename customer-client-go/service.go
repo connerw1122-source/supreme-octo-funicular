@@ -83,28 +83,33 @@ func installServiceElevated(machineCode, serverURL string) error {
         if runtime.GOOS == "windows" {
                 serviceName := "MarqueeIT"
 
-                // Write a batch file that creates the service AND starts it
+                // Write a VBS script that runs the batch file silently (no cmd window)
+                tmpVbs := filepath.Join(os.TempDir(), "marqueeit-install-svc.vbs")
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-install-svc.bat")
                 bat := fmt.Sprintf(`@echo off
 sc stop "%s" >nul 2>&1
 sc delete "%s" >nul 2>&1
 sc create "%s" binPath= "%s --unattended %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
+sc description "%s" "MarqueeIT Remote Support - allows technicians to connect remotely"
+sc failure "%s" reset= 60 actions= restart/5000/restart/10000/restart/30000
 sc start "%s"
 echo DONE > "%s"
-`, serviceName, serviceName, serviceName, exe, machineCode, serverURL, serviceName, filepath.Join(os.TempDir(), "marqueeit-svc-done.txt"))
+`, serviceName, serviceName, serviceName, exe, machineCode, serverURL, serviceName, serviceName, serviceName, filepath.Join(os.TempDir(), "marqueeit-svc-done.txt"))
                 os.WriteFile(tmpBat, []byte(bat), 0644)
+                // VBS wrapper runs the bat silently
+                vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "%s", 0, True
+`, tmpBat)
+                os.WriteFile(tmpVbs, []byte(vbs), 0644)
 
-                // Show UAC prompt
-                showMessageBox("MarqueeIT - Admin Required",
-                        "To install unattended access, Windows needs administrator privileges.\n\nPlease click YES on the UAC prompt.")
-
-                // Run elevated via PowerShell
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpBat)
+                // Run elevated via PowerShell (UAC prompt, no message box)
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpVbs)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
                 err := cmd.Run()
                 os.Remove(tmpBat)
+                os.Remove(tmpVbs)
                 if err != nil {
                         return fmt.Errorf("elevated install failed: %w", err)
                 }

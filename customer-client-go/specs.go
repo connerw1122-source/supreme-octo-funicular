@@ -63,9 +63,9 @@ func collectRAMInfo() string {
                         }
                 }
         }
-        // Windows: use GlobalMemoryStatusEx via CGo
+        // Windows: use PowerShell to get RAM in GB
         if runtime.GOOS == "windows" {
-                out, err := winExecPowerShellHidden("(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB")
+                out, err := winExecPowerShellHidden("[math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)")
                 if err == nil && out != "" {
                         return strings.TrimSpace(out) + " GB"
                 }

@@ -64,7 +64,7 @@ export function LandingView({ onCustomer, onTechnicianLogin }: LandingViewProps)
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleContinue()
                   }}
-                  placeholder="ABC123"
+                  placeholder="123456"
                   className="text-2xl tracking-[0.4em] font-mono uppercase text-center h-16 border-2 focus:border-[#1B3A6B]"
                   maxLength={8}
                   autoFocus

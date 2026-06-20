@@ -27,7 +27,6 @@ import (
         "flag"
         "fmt"
         "image/jpeg"
-        "io"
         "log"
         "net/http"
         "net/url"
@@ -348,55 +347,78 @@ func (c *Client) RunUnattended(ctx context.Context, machineCode string) error {
         c.machineCode = strings.ToUpper(strings.TrimSpace(machineCode))
         c.ctx, c.cancel = context.WithCancel(ctx)
 
-        // Register
-        registerURL := fmt.Sprintf("%s/api/unattended/%s/register", c.serverURL, c.machineCode)
-        body, _ := json.Marshal(map[string]string{"hostname": c.hostname, "os": c.os})
-        resp, err := http.Post(registerURL, "application/json", bytes.NewReader(body))
-        if err != nil {
-                return fmt.Errorf("register: %w", err)
+        // Register with retry (network might not be ready on boot)
+        var registered bool
+        for i := 0; i < 12; i++ { // retry for up to 60 seconds
+                registerURL := fmt.Sprintf("%s/api/unattended/%s/register", c.serverURL, c.machineCode)
+                body, _ := json.Marshal(map[string]string{"hostname": c.hostname, "os": c.os})
+                resp, err := http.Post(registerURL, "application/json", bytes.NewReader(body))
+                if err == nil && resp.StatusCode < 400 {
+                        resp.Body.Close()
+                        registered = true
+                        break
+                }
+                if resp != nil {
+                        resp.Body.Close()
+                }
+                c.Log("Registration attempt %d failed, retrying in 5s...", i+1)
+                select {
+                case <-ctx.Done():
+                        return nil
+                case <-time.After(5 * time.Second):
+                }
         }
-        if resp.StatusCode >= 400 {
-                b, _ := io.ReadAll(resp.Body)
-                resp.Body.Close()
-                return fmt.Errorf("register failed (%d): %s", resp.StatusCode, string(b))
+        if !registered {
+                return fmt.Errorf("failed to register after 12 attempts")
         }
-        resp.Body.Close()
 
-        fmt.Printf("\nMarqueeIT unattended access set up on this machine.\n")
-        fmt.Printf("  Machine code: %s\n", c.machineCode)
-        fmt.Printf("  Hostname:     %s\n", c.hostname)
-        fmt.Printf("  OS:           %s\n", c.os)
-        fmt.Printf("\nYour technician can connect any time from the MarqueeIT dashboard.\n")
-        fmt.Printf("Press Ctrl+C to stop.\n\n")
+        c.Log("Unattended mode registered. Machine code: %s", c.machineCode)
 
+        // Install autostart as backup (in case the service doesn't start)
         installAutostart(c.serverURL, c.machineCode)
 
-        ticker := time.NewTicker(5 * time.Second)
-        defer ticker.Stop()
-
+        // Heartbeat loop — reconnect on failure
         for {
                 select {
                 case <-ctx.Done():
                         return nil
-                case <-ticker.C:
-                        pending, err := c.heartbeat()
-                        if err != nil {
-                                c.Log("heartbeat error: %v", err)
-                                continue
+                default:
+                }
+
+                // Heartbeat
+                pending, err := c.heartbeat()
+                if err != nil {
+                        c.Log("heartbeat error: %v, retrying in 5s...", err)
+                        select {
+                        case <-ctx.Done():
+                                return nil
+                        case <-time.After(5 * time.Second):
                         }
-                        if pending != "" {
-                                c.Log("Technician is connecting with session %s", pending)
-                                c.code = pending
-                                // Run a normal client session
-                                subCtx, subCancel := context.WithCancel(ctx)
-                                if err := c.Run(subCtx); err != nil {
-                                        c.Log("Connect failed: %v", err)
-                                }
-                                subCancel()
-                                // Reset for next session
-                                c.ctx, c.cancel = context.WithCancel(ctx)
-                                c.Log("Session ended. Listening for new connections...")
+                        continue
+                }
+
+                if pending != "" {
+                        c.Log("Technician is connecting with session %s", pending)
+                        c.code = pending
+                        // Mark session as active
+                        joinURL := fmt.Sprintf("%s/api/sessions/%s/join", c.serverURL, pending)
+                        joinBody, _ := json.Marshal(map[string]string{"customerName": c.hostname})
+                        http.Post(joinURL, "application/json", bytes.NewReader(joinBody))
+
+                        // Start a normal client session
+                        subCtx, subCancel := context.WithCancel(ctx)
+                        if err := c.Run(subCtx); err != nil {
+                                c.Log("Session ended: %v", err)
                         }
+                        subCancel()
+                        c.ctx, c.cancel = context.WithCancel(ctx)
+                        c.Log("Session ended. Listening for new connections...")
+                }
+
+                select {
+                case <-ctx.Done():
+                        return nil
+                case <-time.After(5 * time.Second):
                 }
         }
 }
