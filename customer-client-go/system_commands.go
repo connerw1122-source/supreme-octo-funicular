@@ -124,6 +124,22 @@ func HandleSystemCommand(msg map[string]interface{}) {
         case "recording-stop":
                 sendJSON(map[string]interface{}{"type": "recording-ack", "recording": false})
 
+        // --- Elevate session (restart client as admin) ---
+        case "elevate-session":
+                showMessageBox("MarqueeIT - Admin Required",
+                        "Your technician is requesting to restart MarqueeIT with administrator privileges.\n\nPlease click YES on the UAC prompt.")
+                exe, _ := os.Executable()
+                // Get current command-line args to re-launch with same session
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -ArgumentList '-code','%s','-server','%s' -Verb RunAs`, exe, globalClient.code, globalClient.serverURL)
+                cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
+                cmd.SysProcAttr = &syscall.SysProcAttr{}
+                hideWindow(cmd.SysProcAttr)
+                cmd.Start()
+                // Acknowledge then shut down (the elevated copy will take over)
+                sendJSON(map[string]interface{}{"type": "elevate-result", "result": "restarting"})
+                time.Sleep(1 * time.Second)
+                globalClient.shutdown()
+
         // --- Install as unattended service (during active session) ---
         case "install-unattended":
                 serverURL, _ := msg["server"].(string)
@@ -290,37 +306,36 @@ func execRemoteCommand(command string) string {
 }
 
 // execElevatedCommand runs a command with admin privileges via UAC prompt.
-// On Windows, uses ShellExecute with "runas" verb (shows UAC dialog).
-// On Linux/Mac, uses sudo.
+// Non-blocking — the UAC prompt appears, the customer clicks YES, and the
+// command runs. We don't wait for it to finish (which would block input).
 func execElevatedCommand(command string) string {
         if runtime.GOOS == "windows" {
-                // Write the command to a temp .bat file, then execute it elevated
+                // Write the command to a temp .bat file
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-elevated.bat")
-                batContent := "@echo off\n" + command + "\n"
-                // Redirect output to a temp file so we can read it back
                 tmpOut := filepath.Join(os.TempDir(), "marqueeit-elevated-out.txt")
-                batContent += "> \"" + tmpOut + "\" 2>&1"
+                batContent := fmt.Sprintf("@echo off\n%s > \"%s\" 2>&1", command, tmpOut)
                 os.WriteFile(tmpBat, []byte(batContent), 0644)
 
-                // Use ShellExecute with "runas" to trigger UAC
-                showMessageBox("MarqueeIT - UAC Required",
+                // Show a message box explaining what's happening
+                showMessageBox("MarqueeIT - Admin Required",
                         "Your technician is requesting administrator privileges to run:\n\n"+command+
                                 "\n\nPlease click YES on the UAC prompt.")
 
-                // Execute via PowerShell Start-Process -Verb RunAs
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpBat)
+                // Execute via PowerShell Start-Process -Verb RunAs (NO -Wait, non-blocking)
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpBat)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
-                cmd.Run()
+                cmd.Start() // non-blocking
 
-                // Read the output file
+                // Wait a few seconds for the output file to appear, then read it
+                time.Sleep(5 * time.Second)
                 out, _ := os.ReadFile(tmpOut)
                 os.Remove(tmpBat)
-                os.Remove(tmpOut)
-                return string(out)
+                // Don't delete tmpOut yet — the elevated process might still be writing
+                return string(out) + "\n[elevated command running — output may be incomplete]"
         }
-        // Linux/Mac: use sudo
+        // Linux/Mac: use sudo (non-blocking)
         cmd := exec.Command("sudo", "sh", "-c", command)
         out, err := cmd.Output()
         if err != nil {

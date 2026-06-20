@@ -3,6 +3,7 @@ package main
 import (
         "fmt"
         "os"
+        "os/exec"
         "runtime"
         "strings"
 
@@ -50,7 +51,7 @@ func collectCPUInfo() string {
 }
 
 func collectRAMInfo() string {
-        // Read /proc/meminfo on Linux
+        // Linux: read /proc/meminfo
         if data, err := os.ReadFile("/proc/meminfo"); err == nil {
                 lines := strings.Split(string(data), "\n")
                 for _, line := range lines {
@@ -60,6 +61,21 @@ func collectRAMInfo() string {
                                         return parts[1] + " kB"
                                 }
                         }
+                }
+        }
+        // Windows: use GlobalMemoryStatusEx via CGo
+        if runtime.GOOS == "windows" {
+                out, err := winExecPowerShellHidden("(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB")
+                if err == nil && out != "" {
+                        return strings.TrimSpace(out) + " GB"
+                }
+        }
+        // Mac: use sysctl
+        if runtime.GOOS == "darwin" {
+                out, err := exec.Command("sysctl", "-n", "hw.memsize").Output()
+                if err == nil {
+                        bytes := strings.TrimSpace(string(out))
+                        return bytes + " bytes"
                 }
         }
         return "unknown"

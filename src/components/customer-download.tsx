@@ -226,76 +226,59 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
                 </div>
               </div>
 
-              {/* Step 1: pick your computer type */}
+              {/* Step 1: download (auto-detected OS, single big button) */}
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">1</div>
-                  <h4 className="font-semibold text-slate-900">Click your computer type below to download</h4>
+                  <h4 className="font-semibold text-slate-900">Click here to download</h4>
                 </div>
 
-                <div className="grid sm:grid-cols-3 gap-3">
-                  <button
-                    onClick={() => downloadLauncher('windows')}
-                    className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
-                      downloadStarted === 'windows'
-                        ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
-                        : 'border-slate-200 hover:border-[#1B3A6B] hover:bg-[#1B3A6B]/5'
-                    } ${os === 'windows' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
-                  >
-                    <MonitorIcon className="w-8 h-8 text-slate-700" />
-                    <div>
-                      <div className="flex items-center justify-center gap-2">
-                        <p className="font-semibold text-slate-900">Windows</p>
-                        {os === 'windows' && (
-                          <span className="px-1.5 py-0.5 bg-[#FFC425] text-[#1B3A6B] text-[9px] font-bold rounded uppercase">Yours</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500">Windows 10+</p>
-                    </div>
-                    <Download className="w-4 h-4 text-slate-400" />
-                  </button>
+                <div className="relative">
+                  {/* Arrow pointing down at the button */}
+                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 text-[#1B3A6B] animate-bounce">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                      <path d="M12 5v14M5 12l7 7 7-7" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </div>
 
+                  {/* Single big download button — auto-detected OS */}
                   <button
-                    onClick={() => downloadLauncher('mac')}
-                    className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
-                      downloadStarted === 'mac'
-                        ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
-                        : 'border-slate-200 hover:border-[#1B3A6B] hover:bg-[#1B3A6B]/5'
-                    } ${os === 'mac' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
+                    onClick={() => {
+                      const platform = os === 'mac' ? 'mac' : os === 'linux' ? 'linux' : 'windows'
+                      downloadLauncher(platform)
+                    }}
+                    className={`w-full flex items-center justify-center gap-3 p-5 rounded-lg transition-all text-center ${
+                      downloadStarted
+                        ? 'bg-[#1B3A6B] text-white'
+                        : 'bg-[#1B3A6B] hover:bg-[#0F2A52] text-white shadow-lg'
+                    }`}
                   >
-                    <Apple className="w-8 h-8 text-slate-700" />
+                    {downloadStarted ? (
+                      <Check className="w-6 h-6 text-[#FFC425]" />
+                    ) : (
+                      <Download className="w-6 h-6 text-[#FFC425]" />
+                    )}
                     <div>
-                      <div className="flex items-center justify-center gap-2">
-                        <p className="font-semibold text-slate-900">Mac</p>
-                        {os === 'mac' && (
-                          <span className="px-1.5 py-0.5 bg-[#FFC425] text-[#1B3A6B] text-[9px] font-bold rounded uppercase">Yours</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500">macOS 11+</p>
+                      <p className="font-bold text-lg">
+                        {downloadStarted ? 'Downloaded!' : 'Download MarqueeIT'}
+                      </p>
+                      <p className="text-xs text-blue-200">
+                        {os === 'mac' ? 'For macOS' : os === 'linux' ? 'For Linux' : 'For Windows'}
+                      </p>
                     </div>
-                    <Download className="w-4 h-4 text-slate-400" />
                   </button>
+                </div>
 
-                  <button
-                    onClick={() => downloadLauncher('linux')}
-                    className={`flex flex-col items-center gap-2 p-4 rounded-lg bg-white border-2 transition-all text-center ${
-                      downloadStarted === 'linux'
-                        ? 'border-[#1B3A6B] bg-[#1B3A6B]/5'
-                        : 'border-slate-200 hover:border-[#1B3A6B] hover:bg-[#1B3A6B]/5'
-                    } ${os === 'linux' ? 'ring-2 ring-[#FFC425] ring-offset-1' : ''}`}
-                  >
-                    <MonitorIcon className="w-8 h-8 text-slate-700" />
-                    <div>
-                      <div className="flex items-center justify-center gap-2">
-                        <p className="font-semibold text-slate-900">Linux</p>
-                        {os === 'linux' && (
-                          <span className="px-1.5 py-0.5 bg-[#FFC425] text-[#1B3A6B] text-[9px] font-bold rounded uppercase">Yours</span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-500">Any Linux</p>
+                {/* Small "wrong OS?" link */}
+                <div className="mt-2 text-center">
+                  <details className="text-xs text-slate-500">
+                    <summary className="cursor-pointer hover:text-slate-700">Wrong operating system?</summary>
+                    <div className="flex gap-2 justify-center mt-2">
+                      <button onClick={() => downloadLauncher('windows')} className="px-3 py-1 rounded border border-slate-300 hover:bg-slate-100">Windows</button>
+                      <button onClick={() => downloadLauncher('mac')} className="px-3 py-1 rounded border border-slate-300 hover:bg-slate-100">Mac</button>
+                      <button onClick={() => downloadLauncher('linux')} className="px-3 py-1 rounded border border-slate-300 hover:bg-slate-100">Linux</button>
                     </div>
-                    <Download className="w-4 h-4 text-slate-400" />
-                  </button>
+                  </details>
                 </div>
 
                 {downloadStarted && (

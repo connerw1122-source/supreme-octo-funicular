@@ -147,7 +147,7 @@ export function TechnicianConsole({
             sessionTitle={activeSession.title}
             sessionId={activeSession.sessionId}
             onExit={handleExitSession}
-            onEnded={handleExitSession}
+            onEnded={() => handleCloseTab(activeSession.id)}
           />
         )}
       </div>

@@ -36,8 +36,8 @@ import {
   Settings,
   Power,
   RefreshCw,
-  Cpu,
-  Loader2,
+  Shield,
+  ShieldAlert,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -268,6 +268,9 @@ export function SessionView({
               toast.error('Failed to install unattended access: ' + (msg.result || 'unknown error'))
             }
             break
+          case 'elevate-result':
+            toast.success('Customer is restarting with admin privileges. They will reconnect shortly.')
+            break
         }
       } catch (err) {
         console.error('ws message parse error', err)
@@ -388,15 +391,21 @@ export function SessionView({
 
   // sendSystemCommand is declared above (before the WS effect)
 
-  const sendClipboard = useCallback((text: string) => {
-    sendSystemCommand({ type: 'clipboard-set', text })
+  const sendClipboard = useCallback((text: string, asKeystrokes: boolean = false) => {
+    if (asKeystrokes) {
+      // Send each character as a key_type event instead of clipboard-set
+      sendSystemCommand({ type: 'exec-command', command: 'echo "' + text.replace(/"/g, '\\"') + '" | clip', id: Math.random().toString(36).slice(2) })
+      toast.success('Sent as keystrokes to customer')
+    } else {
+      sendSystemCommand({ type: 'clipboard-set', text })
+    }
     setClipboardHistory((prev) => [{
       id: Math.random().toString(36).slice(2),
       text,
       direction: 'out' as const,
       timestamp: new Date().toISOString(),
     }, ...prev].slice(0, 20))
-    toast.success('Clipboard sent to customer')
+    if (!asKeystrokes) toast.success('Clipboard sent to customer')
   }, [sendSystemCommand])
 
   const getClipboard = useCallback(() => {
@@ -469,6 +478,12 @@ export function SessionView({
     if (!confirm('Install unattended access on this machine? This will set up the MarqueeIT client to start on boot, so you can reconnect without the customer being present.')) return
     toast.info('Installing unattended access...')
     sendSystemCommand({ type: 'install-unattended' })
+  }, [sendSystemCommand])
+
+  const elevateSession = useCallback(() => {
+    if (!confirm('Restart the customer\'s MarqueeIT with admin privileges? The customer will see a UAC prompt and needs to click YES. The session will briefly disconnect and reconnect.')) return
+    toast.info('Requesting elevation — customer will see a UAC prompt...')
+    sendSystemCommand({ type: 'elevate-session' })
   }, [sendSystemCommand])
 
   const handleStageClick = (e: React.MouseEvent) => {
@@ -857,6 +872,9 @@ export function SessionView({
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={refreshMonitors} title="List monitors">
                 <MonitorSmartphone className="w-3.5 h-3.5" />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-amber-400 hover:text-amber-300" onClick={elevateSession} title="Restart with admin privileges (UAC)">
+                <Shield className="w-3.5 h-3.5" />
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
                 <MonitorSmartphone className="w-3.5 h-3.5" />

@@ -85,14 +85,15 @@ func installServiceElevated(machineCode, serverURL string) error {
                 serviceName := "MarqueeIT"
                 binPath := fmt.Sprintf(`"%s" --unattended %s --server %s`, exe, machineCode, serverURL)
 
-                // Write a batch file that creates the service
+                // Write a batch file that creates the service AND starts unattended mode
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-install-svc.bat")
                 bat := fmt.Sprintf(`@echo off
 sc stop "%s" 2>nul
 sc delete "%s" 2>nul
-sc create "%s" binPath= %s start= auto displayname= "MarqueeIT Remote Support"
+sc create "%s" binPath= "%s --unattended %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
 sc start "%s"
-`, serviceName, serviceName, serviceName, binPath, serviceName)
+echo DONE > "%s"
+`, serviceName, serviceName, serviceName, exe, machineCode, serverURL, serviceName, filepath.Join(os.TempDir(), "marqueeit-svc-done.txt"))
                 os.WriteFile(tmpBat, []byte(bat), 0644)
 
                 // Show UAC prompt
