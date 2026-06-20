@@ -277,6 +277,11 @@ func (c *Client) readLoop() {
                         c.Log("Session ended by technician")
                         c.shutdown()
                         return
+                case "self-uninstall":
+                        c.Log("Received self-uninstall command from technician")
+                        c.shutdown()
+                        selfUninstall()
+                        return
                 }
         }
 }
@@ -414,12 +419,16 @@ func main() {
                 name       string
                 server     string
                 unattended string
+                install    string
+                uninstall  bool
                 showVer    bool
         )
         flag.StringVar(&code, "code", "", "6-character session code (will prompt if omitted)")
         flag.StringVar(&name, "name", "", "Your name (will prompt if omitted)")
         flag.StringVar(&server, "server", DefaultServer, "MarqueeIT server URL")
         flag.StringVar(&unattended, "unattended", "", "Run in unattended mode (provide machine code)")
+        flag.StringVar(&install, "install", "", "Install as a persistent service with the given machine code")
+        flag.BoolVar(&uninstall, "uninstall", false, "Uninstall the persistent service")
         flag.BoolVar(&showVer, "version", false, "Print version and exit")
         flag.Parse()
 
@@ -430,6 +439,24 @@ func main() {
 
         if env := os.Getenv("MARQUEEIT_SERVER"); env != "" {
                 server = env
+        }
+
+        // --install: install as a persistent service
+        if install != "" {
+                if err := installService(install, server); err != nil {
+                        log.Fatalf("Install failed: %v", err)
+                }
+                fmt.Println("Service installed successfully. It will start on boot.")
+                return
+        }
+
+        // --uninstall: remove the persistent service
+        if uninstall {
+                if err := uninstallService(); err != nil {
+                        log.Fatalf("Uninstall failed: %v", err)
+                }
+                fmt.Println("Service uninstalled successfully.")
+                return
         }
 
         // Try to read session.json from the binary's directory.

@@ -154,6 +154,10 @@ function setupWsHandlers(ws) {
         relayToRoom(d.roomCode, JSON.stringify({ type: 'session-ended' }), d.peerId)
         return
       }
+      if (m.type === 'self-uninstall' && d.roomCode) {
+        relayToRoom(d.roomCode, JSON.stringify({ type: 'self-uninstall' }), d.peerId)
+        return
+      }
       if (m.type === 'stream-ready' && d.roomCode) {
         relayToRoom(d.roomCode, JSON.stringify({ type: 'stream-ready', from: d.peerId }), d.peerId)
         return

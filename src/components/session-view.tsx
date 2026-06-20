@@ -4,8 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import {
@@ -27,6 +25,7 @@ import {
   WifiOff,
   MousePointer2,
   Keyboard,
+  Trash2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -95,7 +94,6 @@ export function SessionView({
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const drawFrameRef = useRef<(buffer: ArrayBuffer) => void>(() => {})
-  const chatScrollRef = useRef<HTMLDivElement | null>(null)
   const lastMouseMoveRef = useRef<number>(0)
   const pressedKeysRef = useRef<Set<string>>(new Set())
   const wsRef = useRef<WebSocket | null>(null)
@@ -247,15 +245,6 @@ export function SessionView({
   }, [drawFrame])
 
   // -------------------------------------------------------------------------
-  // Auto-scroll chat to bottom
-  // -------------------------------------------------------------------------
-  useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
-    }
-  }, [chatMessages])
-
-  // -------------------------------------------------------------------------
   // Customer connection status (last frame within last 3 seconds)
   // -------------------------------------------------------------------------
   useEffect(() => {
@@ -294,10 +283,36 @@ export function SessionView({
     const canvas = canvasRef.current
     if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
-    const x = (e.clientX - rect.left) / rect.width
-    const y = (e.clientY - rect.top) / rect.height
-    if (x < 0 || x > 1 || y < 0 || y > 1) return null
-    return { x, y }
+
+    // The canvas element may be larger than the actual image displayed
+    // because of object-contain letterboxing. We need to compute the
+    // actual displayed image area within the canvas.
+    const canvasW = rect.width
+    const canvasH = rect.height
+    const imgW = canvas.width   // intrinsic image width (set by drawFrame)
+    const imgH = canvas.height  // intrinsic image height
+
+    if (imgW === 0 || imgH === 0) return null
+
+    // Compute the scale and offset of the image within the canvas
+    const scaleX = canvasW / imgW
+    const scaleY = canvasH / imgH
+    const scale = Math.min(scaleX, scaleY) // object-contain uses min
+
+    // Displayed image dimensions
+    const dispW = imgW * scale
+    const dispH = imgH * scale
+
+    // Offsets (letterbox borders)
+    const offsetX = (canvasW - dispW) / 2
+    const offsetY = (canvasH - dispH) / 2
+
+    // Convert mouse position to image coordinates
+    const imgX = (e.clientX - rect.left - offsetX) / dispW
+    const imgY = (e.clientY - rect.top - offsetY) / dispH
+
+    if (imgX < 0 || imgX > 1 || imgY < 0 || imgY > 1) return null
+    return { x: imgX, y: imgY }
   }, [])
 
   const sendInput = useCallback((event: Record<string, any>): boolean => {
@@ -574,8 +589,15 @@ export function SessionView({
             {customerConnected ? (
               <canvas
                 ref={canvasRef}
-                className="w-full h-full object-contain"
-                style={{ imageRendering: 'auto' }}
+                className="object-contain"
+                style={{
+                  imageRendering: 'auto',
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  border: '2px solid #FFC425',
+                  borderRadius: '4px',
+                  boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
+                }}
               />
             ) : (
               <WaitingForCustomer code={roomCode} connected={connected} />
@@ -675,155 +697,287 @@ export function SessionView({
           </div>
         </div>
 
-        {/* Right sidebar */}
-        <aside className="w-80 border-l border-slate-800 bg-slate-900 flex flex-col shrink-0">
-          <Tabs defaultValue="chat" className="flex-1 flex flex-col">
-            <TabsList className="grid grid-cols-2 bg-slate-800 rounded-none border-b border-slate-800">
-              <TabsTrigger value="chat" className="data-[state=active]:bg-slate-700">
-                <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
-                Chat
-              </TabsTrigger>
-              <TabsTrigger value="info" className="data-[state=active]:bg-slate-700">
-                <FileText className="w-3.5 h-3.5 mr-1.5" />
-                Info
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="chat" className="flex-1 flex flex-col m-0 data-[state=inactive]:hidden">
-              <ScrollArea className="flex-1">
-                <div ref={chatScrollRef} className="p-3 space-y-2 max-h-full">
-                  {chatMessages.length === 0 ? (
-                    <div className="text-center text-slate-500 text-sm py-8">
-                      <MessageSquare className="w-6 h-6 mx-auto mb-2 opacity-40" />
-                      No messages yet.
-                      <br />
-                      Say hello to {peer?.name ?? 'the customer'}!
-                    </div>
-                  ) : (
-                    chatMessages.map((m) => {
-                      const isMine = m.sender === displayName
-                      return (
-                        <div key={m.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
-                          <div
-                            className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                              isMine
-                                ? 'bg-[#1B3A6B] text-white'
-                                : m.sender === 'System'
-                                ? 'bg-slate-800 text-slate-300 italic text-xs'
-                                : 'bg-slate-800 text-slate-100'
-                            }`}
-                          >
-                            {!isMine && (
-                              <p className="text-xs font-semibold mb-0.5 text-slate-400">{m.sender}</p>
-                            )}
-                            <p className="whitespace-pre-wrap break-words">{m.content}</p>
-                          </div>
-                          <span className="text-[10px] text-slate-500 mt-0.5 px-1">
-                            {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </ScrollArea>
-              <div className="border-t border-slate-800 p-3 flex gap-2">
-                <Input
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      sendChat()
-                    }
-                  }}
-                  placeholder="Type a message…"
-                  className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500"
-                />
-                <Button size="sm" onClick={sendChat} disabled={!chatInput.trim()} className="bg-[#1B3A6B] hover:bg-[#0F2A52]">
-                  <Send className="w-4 h-4" />
-                </Button>
+        {/* Right sidebar — Info tab only (chat is now a floating overlay) */}
+        <aside className="w-72 border-l border-slate-800 bg-slate-900 flex flex-col shrink-0">
+          <div className="px-4 py-3 border-b border-slate-800">
+            <div className="flex items-center gap-2">
+              <FileText className="w-4 h-4 text-slate-400" />
+              <h3 className="text-sm font-semibold text-slate-200">Session Info</h3>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4">
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Session</p>
+                <p className="font-medium text-slate-200">{sessionTitle}</p>
+                <p className="text-xs text-slate-500 mt-1">Code: <span className="font-mono">{roomCode}</span></p>
               </div>
-            </TabsContent>
-
-            <TabsContent value="info" className="flex-1 overflow-y-auto p-3 data-[state=inactive]:hidden">
-              <div className="space-y-3 text-sm">
-                <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Session</p>
-                  <p className="font-medium text-slate-200">{sessionTitle}</p>
-                  <p className="text-xs text-slate-500 mt-1">Code: <span className="font-mono">{roomCode}</span></p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Participants</p>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2 text-sm">
-                      <div className={`w-2 h-2 rounded-full ${connected ? 'bg-[#FFC425]' : 'bg-slate-600'}`} />
-                      <span className="text-slate-200">{displayName}</span>
-                      <span className="text-slate-500 text-xs">(you · technician)</span>
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Participants</p>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 text-sm">
+                    <div className={`w-2 h-2 rounded-full ${connected ? 'bg-[#FFC425]' : 'bg-slate-600'}`} />
+                    <span className="text-slate-200">{displayName}</span>
+                    <span className="text-slate-500 text-xs">(you · technician)</span>
+                  </div>
+                  {peers.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2 text-sm">
+                      <div className="w-2 h-2 rounded-full bg-[#FFC425]" />
+                      <span className="text-slate-200">{p.name}</span>
+                      <span className="text-slate-500 text-xs">({p.role}{p.kind === 'ws' ? ' · native app' : ''})</span>
                     </div>
-                    {peers.map((p) => (
-                      <div key={p.id} className="flex items-center gap-2 text-sm">
-                        <div className="w-2 h-2 rounded-full bg-[#FFC425]" />
-                        <span className="text-slate-200">{p.name}</span>
-                        <span className="text-slate-500 text-xs">({p.role}{p.kind === 'ws' ? ' · native app' : ''})</span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Connection</p>
+                <p className="text-xs text-slate-400">
+                  Socket: {connected ? 'connected' : 'disconnected'}<br />
+                  Screen frames: {receivingFrames ? 'streaming' : 'idle'}<br />
+                  Last frame: {lastFrameAt ? `${Math.max(0, Math.floor((Date.now() - lastFrameAt) / 1000))}s ago` : 'never'}
+                </p>
+              </div>
+              {/* Customer machine specs */}
+              {machineSpecs.os && (
+                <div>
+                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Customer Machine</p>
+                  <div className="space-y-1 text-xs text-slate-300">
+                    {machineSpecs.hostname && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Hostname</span>
+                        <span className="font-mono">{machineSpecs.hostname}</span>
                       </div>
-                    ))}
+                    )}
+                    {machineSpecs.os && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">OS</span>
+                        <span>{machineSpecs.os} {machineSpecs.arch && `(${machineSpecs.arch})`}</span>
+                      </div>
+                    )}
+                    {machineSpecs.cpu && (
+                      <div className="flex justify-between gap-2">
+                        <span className="text-slate-500 shrink-0">CPU</span>
+                        <span className="text-right">{machineSpecs.cpu}</span>
+                      </div>
+                    )}
+                    {machineSpecs.ram && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">RAM</span>
+                        <span>{machineSpecs.ram}</span>
+                      </div>
+                    )}
+                    {machineSpecs.screen && (
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Screen</span>
+                        <span className="font-mono">{machineSpecs.screen}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div>
-                  <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Connection</p>
-                  <p className="text-xs text-slate-400">
-                    Socket: {connected ? 'connected' : 'disconnected'}<br />
-                    Screen frames: {receivingFrames ? 'streaming' : 'idle'}<br />
-                    Last frame: {lastFrameAt ? `${Math.max(0, Math.floor((Date.now() - lastFrameAt) / 1000))}s ago` : 'never'}
-                  </p>
-                </div>
-                {/* Customer machine specs */}
-                {machineSpecs.os && (
-                  <div>
-                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Customer Machine</p>
-                    <div className="space-y-1 text-xs text-slate-300">
-                      {machineSpecs.hostname && (
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Hostname</span>
-                          <span className="font-mono">{machineSpecs.hostname}</span>
-                        </div>
-                      )}
-                      {machineSpecs.os && (
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">OS</span>
-                          <span>{machineSpecs.os} {machineSpecs.arch && `(${machineSpecs.arch})`}</span>
-                        </div>
-                      )}
-                      {machineSpecs.cpu && (
-                        <div className="flex justify-between gap-2">
-                          <span className="text-slate-500 shrink-0">CPU</span>
-                          <span className="text-right">{machineSpecs.cpu}</span>
-                        </div>
-                      )}
-                      {machineSpecs.ram && (
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">RAM</span>
-                          <span>{machineSpecs.ram}</span>
-                        </div>
-                      )}
-                      {machineSpecs.screen && (
-                        <div className="flex justify-between">
-                          <span className="text-slate-500">Screen</span>
-                          <span className="font-mono">{machineSpecs.screen}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-          </Tabs>
+              )}
+            </div>
+          </div>
+
+          {/* Remote uninstall — dangerous action, at the bottom */}
+          {customerConnected && (
+            <div className="p-3 border-t border-slate-800">
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full border-red-700 text-red-500 hover:bg-red-950 hover:text-red-400"
+                onClick={() => {
+                  if (!confirm('Remote uninstall will remove the MarqueeIT client from the customer\'s machine. This cannot be undone. Continue?')) return
+                  wsRef.current?.send(JSON.stringify({ type: 'self-uninstall' }))
+                  toast.success('Uninstall command sent to customer')
+                }}
+              >
+                <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                Remote Uninstall
+              </Button>
+              <p className="text-[10px] text-slate-500 mt-1 text-center">
+                Removes the client from the customer&apos;s machine
+              </p>
+            </div>
+          )}
         </aside>
       </div>
+
+      {/* Floating chat overlay — hidden until a message arrives, like ScreenConnect.
+          Slides in from the bottom-right when the tech sends a message or the
+          user clicks the chat icon. Auto-hides after 30s of inactivity. */}
+      <FloatingChat
+        messages={chatMessages}
+        displayName={displayName}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        onSend={sendChat}
+        peerName={peer?.name}
+      />
     </div>
   )
 }
+
+// ---------------------------------------------------------------------------
+// FloatingChat — hidden by default, slides in when a message arrives.
+// Like ScreenConnect: unobtrusive until needed.
+// ---------------------------------------------------------------------------
+
+interface FloatingChatProps {
+  messages: ChatMessage[]
+  displayName: string
+  chatInput: string
+  setChatInput: (v: string) => void
+  onSend: () => void
+  peerName?: string
+}
+
+function FloatingChat({ messages, displayName, chatInput, setChatInput, onSend, peerName }: FloatingChatProps) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+  const lastMessageCountRef = useRef(0)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const autoHideTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Track unread messages from the other party
+  useEffect(() => {
+    if (messages.length > lastMessageCountRef.current) {
+      const newMessages = messages.slice(lastMessageCountRef.current)
+      const hasIncoming = newMessages.some((m) => m.sender !== displayName)
+      if (hasIncoming && !isOpen) {
+        setUnreadCount((c) => c + newMessages.filter((m) => m.sender !== displayName).length)
+        setIsOpen(true)
+      }
+    }
+    lastMessageCountRef.current = messages.length
+  }, [messages, displayName, isOpen])
+
+  // Auto-hide after 30s of inactivity (only when there are no unread messages)
+  useEffect(() => {
+    if (!isOpen || unreadCount > 0) return
+    if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current)
+    autoHideTimerRef.current = setTimeout(() => {
+      setIsOpen(false)
+    }, 30000)
+    return () => {
+      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current)
+    }
+  }, [isOpen, unreadCount, messages])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, isOpen])
+
+  // Reset unread count when opened
+  useEffect(() => {
+    if (isOpen && unreadCount > 0) {
+      const t = setTimeout(() => setUnreadCount(0), 0)
+      return () => clearTimeout(t)
+    }
+  }, [isOpen, unreadCount])
+
+  return (
+    <div className="absolute bottom-4 right-4 z-50 pointer-events-none">
+      {/* Chat panel */}
+      {isOpen && (
+        <div className="pointer-events-auto w-80 bg-slate-900/95 backdrop-blur border border-slate-700 rounded-lg shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-5 duration-200">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 bg-slate-800 border-b border-slate-700">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-[#FFC425]" />
+              <span className="text-sm font-semibold text-slate-200">Chat</span>
+              {peerName && <span className="text-xs text-slate-500">with {peerName}</span>}
+            </div>
+            <button
+              onClick={() => setIsOpen(false)}
+              className="text-slate-400 hover:text-white transition-colors p-1 rounded"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Messages */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-3 space-y-2 max-h-64 scroll-thin">
+            {messages.length === 0 ? (
+              <p className="text-center text-slate-500 text-xs py-4">No messages yet</p>
+            ) : (
+              messages.map((m) => {
+                const isMine = m.sender === displayName
+                return (
+                  <div key={m.id} className={`flex flex-col ${isMine ? 'items-end' : 'items-start'}`}>
+                    <div
+                      className={`max-w-[85%] rounded-lg px-2.5 py-1.5 text-xs ${
+                        isMine
+                          ? 'bg-[#1B3A6B] text-white'
+                          : 'bg-slate-800 text-slate-100'
+                      }`}
+                    >
+                      {!isMine && (
+                        <p className="text-[10px] font-semibold mb-0.5 text-slate-400">{m.sender}</p>
+                      )}
+                      <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                    </div>
+                    <span className="text-[9px] text-slate-500 mt-0.5 px-1">
+                      {new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                )
+              })
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="border-t border-slate-700 p-2 flex gap-1.5">
+            <Input
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  onSend()
+                }
+              }}
+              placeholder="Type a message…"
+              className="bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500 text-xs h-8"
+            />
+            <Button
+              size="sm"
+              onClick={onSend}
+              disabled={!chatInput.trim()}
+              className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Floating button (when chat is closed) */}
+      {!isOpen && (
+        <button
+          onClick={() => setIsOpen(true)}
+          className="pointer-events-auto w-12 h-12 rounded-full bg-[#1B3A6B] hover:bg-[#0F2A52] text-[#FFC425] shadow-lg flex items-center justify-center transition-all hover:scale-105 relative"
+          title="Open chat"
+        >
+          <MessageSquare className="w-5 h-5" />
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 bg-[#FFC425] text-[#1B3A6B] text-[10px] font-bold rounded-full w-5 h-5 flex items-center justify-center">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// WaitingForCustomer
+// ---------------------------------------------------------------------------
 
 function WaitingForCustomer({
   code,

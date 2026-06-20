@@ -1,20 +1,24 @@
 # ===========================================================================
 # MarqueeIT - docker-compose.yml
 # ===========================================================================
-# Runs the full stack:
-#   - nextjs     : the Next.js app + API (port 3000 internally)
-#   - signaling  : the Bun-based WebSocket signaling server (port 3003)
-#   - caddy      : reverse proxy on port 80 (and 443 if you set DOMAIN)
+# Runs the Next.js app and signaling server. Designed to sit behind an
+# EXISTING reverse proxy (Caddy, Nginx, Traefik, etc.) — does NOT include
+# its own Caddy service to avoid port 80/443 conflicts.
+#
+# Connect both containers to your existing proxy's external network so the
+# proxy can route to them by container name:
+#   nextjs:3000    — the web app + REST API + Go binary downloads
+#   signaling:3003 — WebSocket relay for screen frames + input events
+#
+# In your existing proxy config, add:
+#   - HTTP routes for /api/*, /downloads/*, /_next/* → nextjs:3000
+#   - WebSocket route (Connection: Upgrade + Upgrade: websocket) → signaling:3003
+#   - All other HTTP routes → nextjs:3000
 #
 # Usage:
-#   docker compose up -d --build
-#
-# Then visit http://YOUR-SERVER-IP/  (or https://your-domain.com/ if you set
-# DOMAIN below and have port 443 open).
-#
-# To persist data: the sqlite database is stored in the `db-data` volume.
-# To back up: docker run --rm -v marqueeit_db-data:/data -v $(pwd):/backup \
-#             alpine tar czf /backup/marqueeit-db-$(date +%F).tar.gz /data
+#   1. Copy .env.example to .env and set your domain + credentials
+#   2. docker compose up -d --build
+#   3. Configure your reverse proxy to route to these containers
 # ===========================================================================
 
 services:
@@ -32,21 +36,24 @@ services:
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - DATABASE_URL=file:/app/db/marqueeit.db
-      # Auth credentials for the technician login (override in .env)
+      # Auth credentials (override in .env)
       - TECH_USERNAME=${TECH_USERNAME:-Yoda}
       - TECH_PASSWORD=${TECH_PASSWORD:-changeme}
-      # Public URL where customers reach this server. CRITICAL: this must be
-      # set to your real public URL (e.g. https://support.example.com) because
-      # the launcher scripts embed it so the customer's Go binary knows where
-      # to connect. Override in .env.
-      - PUBLIC_URL=${PUBLIC_URL:-http://localhost}
+      # CRITICAL: The public URL customers use to reach this server.
+      # The launcher scripts embed this so the customer's Go binary knows
+      # where to connect. Must match your reverse proxy's public URL.
+      - PUBLIC_URL=${PUBLIC_URL:-https://support.wizardyoda.com}
     volumes:
       - db-data:/app/db
-    # Don't expose port 3000 to the host — Caddy proxies to it internally
+    # Expose ports to the Docker network (not to the host).
+    # Your existing reverse proxy connects to these by container name.
     expose:
       - "3000"
     networks:
-      - marqueeit
+      - default
+      # Connect to your existing proxy's network so it can reach these
+      # containers by name. Uncomment and rename to match your setup:
+      # - copyparty_default
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/"]
       interval: 30s
@@ -69,7 +76,8 @@ services:
     expose:
       - "3003"
     networks:
-      - marqueeit
+      - default
+      # - copyparty_default
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3003/health"]
       interval: 30s
@@ -77,44 +85,17 @@ services:
       retries: 3
       start_period: 10s
 
-  # -------------------------------------------------------------------------
-  # Caddy reverse proxy — single entry point on port 80 (and 443 if DOMAIN)
-  # Routes:
-  #   /api/*          -> nextjs:3000
-  #   /downloads/*    -> nextjs:3000
-  #   / (WebSocket)   -> signaling:3003  (if Upgrade: websocket header)
-  #   / (HTTP)        -> nextjs:3000
-  # -------------------------------------------------------------------------
-  caddy:
-    image: caddy:2-alpine
-    container_name: marqueeit-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile.docker:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    environment:
-      # Set this to your real domain for automatic HTTPS via Let's Encrypt
-      - DOMAIN=${DOMAIN:-:80}
-    depends_on:
-      - nextjs
-      - signaling
-    networks:
-      - marqueeit
-
 # Persistent volumes
 volumes:
   db-data:
     driver: local
-  caddy-data:
-    driver: local
-  caddy-config:
-    driver: local
 
-# Internal network
+# Internal network (containers talk to each other)
+# To connect to an existing proxy's network, add it as an external network
+# above and reference it in the services' networks lists.
 networks:
-  marqueeit:
+  default:
     driver: bridge
+  # Example: connect to an existing external network
+  # copyparty_default:
+  #   external: true

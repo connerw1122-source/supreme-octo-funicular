@@ -101,22 +101,26 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
     setTimeout(() => setCopied(false), 2000)
   }
 
-  // Download a zip file containing the binary + session.json config.
-  // The customer extracts the zip and double-clicks the binary — no
-  // command-line args, no .bat files, no prompts.
+  // Download the launcher file directly (no zip).
+  // Windows: gets a .exe with the session code in the filename.
+  // Mac/Linux: gets a .sh script that downloads the binary and runs it.
   const downloadLauncher = (platform: 'windows' | 'mac' | 'linux') => {
     setDownloadStarted(platform)
     const params = new URLSearchParams({ code: code.toUpperCase() })
     if (name) params.set('name', name)
-    const url = `/api/session-zip/${platform}?${params.toString()}`
+    const url = `/api/launcher-exe/${platform}?${params.toString()}`
     // Trigger download
     const a = document.createElement('a')
     a.href = url
-    a.download = `marqueeit-${code.toUpperCase()}.zip`
+    a.download = platform === 'windows'
+      ? `marqueeit-${code.toUpperCase()}.exe`
+      : `marqueeit-${code.toUpperCase()}.sh`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    toast.success('Download started — extract the zip and double-click the file inside')
+    toast.success(platform === 'windows'
+      ? 'Downloaded — double-click the .exe to start'
+      : 'Downloaded — see instructions below')
   }
 
   if (loadingSession) {
@@ -324,20 +328,23 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
                   <div className="mt-3 p-3 bg-[#1B3A6B]/5 border border-[#1B3A6B]/20 rounded-lg flex items-center gap-2 text-sm text-slate-700">
                     <Check className="w-4 h-4 text-[#1B3A6B] shrink-0" />
                     <span>
-                      Zip file downloaded! <strong>Extract it</strong> (right-click → Extract All on Windows,
-                      double-click on Mac) then <strong>double-click the file inside</strong> to start your session.
+                      {downloadStarted === 'windows' ? (
+                        <>File downloaded! <strong>Double-click marqueeit-{code.toUpperCase()}.exe</strong> to start your session. It will download the client automatically and connect.</>
+                      ) : (
+                        <>Script downloaded! See instructions below to run it.</>
+                      )}
                       Your code <strong className="font-mono">{code.toUpperCase()}</strong>
-                      {name && <> and name <strong>&ldquo;{name}&rdquo;</strong></>} are already configured — you don&apos;t need to enter anything.
+                      {name && <> and name <strong>&ldquo;{name}&rdquo;</strong></>} are already configured.
                     </span>
                   </div>
                 )}
               </div>
 
-              {/* Step 2: extract and run */}
+              {/* Step 2: open the file */}
               <div className="mb-5">
                 <div className="flex items-center gap-2 mb-2.5">
                   <div className="w-6 h-6 rounded-full bg-[#1B3A6B] text-white flex items-center justify-center text-xs font-bold">2</div>
-                  <h4 className="font-semibold text-slate-900">Extract the zip and double-click the file inside</h4>
+                  <h4 className="font-semibold text-slate-900">Open the downloaded file</h4>
                 </div>
                 <BrowserInstructions browser={browser} os={os} code={code} />
               </div>
@@ -352,11 +359,11 @@ export function CustomerDownload({ code, name, onBack }: CustomerDownloadProps) 
                   <div className="flex items-start gap-3">
                     <PlayCircle className="w-5 h-5 text-[#1B3A6B] shrink-0 mt-0.5" />
                     <div className="text-sm text-slate-700 space-y-1.5">
-                      <p>When you double-click the binary:</p>
+                      <p>When you open the file:</p>
                       <ul className="list-disc list-inside space-y-1 ml-2">
                         <li>It connects to your technician using code <span className="font-mono font-bold text-[#1B3A6B]">{code.toUpperCase()}</span></li>
                         {name && <li>Your name <strong>&ldquo;{name}&rdquo;</strong> is sent automatically</li>}
-                        <li>A small status indicator appears — leave it running</li>
+                        <li>The session runs quietly in the background</li>
                       </ul>
                     </div>
                   </div>
@@ -397,7 +404,7 @@ function BrowserInstructions({ browser, os, code }: { browser: Browser; os: OS; 
   }[browser]
 
   const BrowserIcon = browser === 'chrome' ? Chrome : browser === 'edge' ? Globe : Globe
-  const fileName = os === 'windows' ? `marqueeit-start-${code.toUpperCase()}.bat` : `marqueeit-start-${code.toUpperCase()}.sh`
+  const fileName = os === 'windows' ? `marqueeit-${code.toUpperCase()}.exe` : `marqueeit-${code.toUpperCase()}.sh`
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -423,20 +430,20 @@ function ChromeInstructions({ os, fileName }: { os: OS; fileName: string }) {
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">1.</span>
-        <span>Look at the <strong>top-right corner</strong> of this browser. Click the downloaded zip file.</span>
+        <span>Look at the <strong>top-right corner</strong> of this browser. Click the downloaded file.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
         <span>
-          {os === 'windows' && <><strong>Extract</strong> the zip (right-click → "Extract All"). Open the extracted folder and double-click <code className="bg-slate-100 px-1 rounded text-xs">marqueeit-client.exe</code>. If Windows says "protected your PC", click "More info" then "Run anyway".</>}
-          {os === 'mac' && <>Double-click the zip to extract it. Then open the folder and <strong>right-click</strong> (or Control-click) <code className="bg-slate-100 px-1 rounded text-xs">marqueeit-client</code> → choose <strong>"Open"</strong>, then confirm.</>}
-          {os === 'linux' && <>Extract the zip. In a terminal, run <code className="bg-slate-100 px-1 rounded text-xs">chmod +x marqueeit-client && ./marqueeit-client</code>.</>}
-          {!['windows', 'mac', 'linux'].includes(os) && <>Extract the zip and double-click the binary inside.</>}
+          {os === 'windows' && <>If Windows says "protected your PC", click <strong>"More info"</strong> then <strong>"Run anyway"</strong>. The .exe downloads the client automatically and connects.</>}
+          {os === 'mac' && <>Open a terminal, run <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></>}
+          {os === 'linux' && <>Open a terminal, run <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></>}
+          {!['windows', 'mac', 'linux'].includes(os) && <>Click to open the file.</>}
         </span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
-        <span>The binary connects to your technician automatically. A small status indicator appears — leave it running.</span>
+        <span>The session starts automatically and runs quietly in the background.</span>
       </li>
     </ol>
   )
@@ -447,18 +454,18 @@ function EdgeInstructions({ os, fileName }: { os: OS; fileName: string }) {
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">1.</span>
-        <span>Click the <strong>download arrow</strong> (top-right), then click the zip file.</span>
+        <span>Click the <strong>download arrow</strong> (top-right), then click the file.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
         <span>
-          {os === 'windows' && <><strong>Extract</strong> the zip, then double-click <code className="bg-slate-100 px-1 rounded text-xs">marqueeit-client.exe</code>. If Windows says "protected your PC", click "More info" then "Run anyway".</>}
-          {!['windows'].includes(os) && <>Extract the zip and double-click the binary inside.</>}
+          {os === 'windows' && <>If Windows says "protected your PC", click "More info" then "Run anyway".</>}
+          {!['windows'].includes(os) && <>Click to open the file.</>}
         </span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
-        <span>The binary connects automatically. Leave it running.</span>
+        <span>The session starts automatically.</span>
       </li>
     </ol>
   )
@@ -473,18 +480,14 @@ function FirefoxInstructions({ os, fileName }: { os: OS; fileName: string }) {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Click the <strong>blue down-arrow</strong> at top-right, then click the zip file. Extract it.</span>
+        <span>Click the <strong>blue down-arrow</strong> at top-right, then click the file.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
         <span>
-          Double-click the binary inside.
-          {os === 'windows' && <> If Windows says "protected your PC", click "More info" then "Run anyway".</>}
+          {os === 'windows' && <>If Windows says "protected your PC", click "More info" then "Run anyway".</>}
+          {(os === 'mac' || os === 'linux') && <>In a terminal: <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></>}
         </span>
-      </li>
-      <li className="flex gap-2">
-        <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>Leave it running.</span>
       </li>
     </ol>
   )
@@ -499,15 +502,11 @@ function SafariInstructions({ fileName }: { fileName: string }) {
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Double-click the zip file to extract it. Find <code className="bg-slate-100 px-1 rounded text-xs">marqueeit-client</code> in the extracted folder.</span>
+        <span>Find the downloaded <code className="bg-slate-100 px-1 rounded text-xs">{fileName}</code> file.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
-        <span><strong>Right-click</strong> (or Control-click) the file and choose <strong>Open</strong>, then confirm.</span>
-      </li>
-      <li className="flex gap-2">
-        <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>The binary connects automatically. Leave it running.</span>
+        <span>In a terminal: <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></span>
       </li>
     </ol>
   )
@@ -518,23 +517,18 @@ function GenericInstructions({ os, fileName }: { os: OS; fileName: string }) {
     <ol className="space-y-2 text-sm text-slate-700">
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">1.</span>
-        <span>Click the download indicator (top-right) to open the zip file.</span>
+        <span>Click the download indicator (top-right) to open the file.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">2.</span>
-        <span>Extract the zip and open the extracted folder.</span>
+        <span>Or open your Downloads folder and double-click the file.</span>
       </li>
       <li className="flex gap-2">
         <span className="font-bold text-[#1B3A6B] shrink-0">3.</span>
         <span>
-          Double-click the binary inside.
-          {os === 'windows' && <> If Windows says "protected your PC", click "More info" then "Run anyway".</>}
-          {(os === 'mac' || os === 'linux') && <> On Mac, right-click and choose "Open" the first time.</>}
+          {os === 'windows' && <>If Windows says "protected your PC", click "More info" then "Run anyway".</>}
+          {(os === 'mac' || os === 'linux') && <>In a terminal: <code className="bg-slate-100 px-1 rounded text-xs">chmod +x {fileName} && ./{fileName}</code></>}
         </span>
-      </li>
-      <li className="flex gap-2">
-        <span className="font-bold text-[#1B3A6B] shrink-0">4.</span>
-        <span>Leave it running.</span>
       </li>
     </ol>
   )
