@@ -1123,63 +1123,15 @@ export function SessionView({
             )}
 
             {activeTab === 'events' && (
-              <div className="flex flex-col h-full">
-                {/* Log selector + refresh */}
-                <div className="px-2 py-2 border-b border-slate-800 flex items-center gap-1.5 shrink-0">
-                  <select
-                    className="bg-slate-800 text-slate-200 text-xs rounded px-2 py-1 border border-slate-700 flex-1"
-                    value={eventLogName}
-                    onChange={(e) => {
-                      const v = e.target.value as typeof eventLogName
-                      setEventLogName(v)
-                      fetchEventLogs(v)
-                    }}
-                  >
-                    <option value="System">System Log</option>
-                    <option value="Application">Application Log</option>
-                    <option value="Security">Security Log</option>
-                    <option value="Setup">Setup Log</option>
-                  </select>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 px-2 text-slate-300 hover:text-white"
-                    onClick={() => fetchEventLogs(eventLogName)}
-                    title="Refresh event logs"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
-                {/* Hint text */}
-                <div className="px-3 py-1.5 bg-slate-950/50 border-b border-slate-800">
-                  <p className="text-[10px] text-slate-500">
-                    Last 50 events from the <span className="text-[#FFC425]">{eventLogName}</span> log. Use the dropdown to switch logs or click refresh to update.
-                  </p>
-                </div>
-                {/* Output */}
-                <div className="flex-1 overflow-y-auto p-2 space-y-2">
-                  {eventLogs.length === 0 ? (
-                    <p className="text-slate-500 text-xs text-center py-4">
-                      No event logs loaded yet. Click refresh to fetch the latest events from the customer&apos;s machine.
-                    </p>
-                  ) : (
-                    eventLogs.map((e) => (
-                      <div key={e.id} className="bg-slate-800 rounded p-2">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[#FFC425] text-xs font-mono">{e.logName} Log</span>
-                          {e.pending && (
-                            <span className="text-[10px] text-amber-400 flex items-center gap-1">
-                              <RefreshCw className="w-3 h-3 animate-spin" />
-                              Loading…
-                            </span>
-                          )}
-                        </div>
-                        <pre className="text-slate-300 text-[10px] whitespace-pre-wrap break-all max-h-96 overflow-y-auto scroll-thin font-mono">{e.output || '(waiting for output...)'}</pre>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+              <EventLogPanel
+                eventLogs={eventLogs}
+                eventLogName={eventLogName}
+                onRefresh={() => fetchEventLogs(eventLogName)}
+                onSwitchLog={(name) => {
+                  setEventLogName(name)
+                  fetchEventLogs(name)
+                }}
+              />
             )}
 
             {activeTab === 'tasks' && (
@@ -1542,6 +1494,246 @@ function WaitingForCustomer({
       <p className="text-xs text-slate-500 mt-6">
         Status: {connected ? 'Connected to signaling server' : 'Reconnecting…'}
       </p>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// EventLogPanel — clean, structured view of Windows Event Viewer logs.
+// Renders each event as a colored card (red=Error, amber=Warning, blue=Info)
+// instead of a cramped fixed-width table that doesn't fit in the sidebar.
+// ---------------------------------------------------------------------------
+
+interface EventLogEntry {
+  id: string
+  logName: string
+  output: string
+  pending?: boolean
+}
+
+interface ParsedEvent {
+  time?: string
+  id?: number
+  level?: string
+  provider?: string
+  message?: string
+}
+
+function EventLogPanel({
+  eventLogs,
+  eventLogName,
+  onRefresh,
+  onSwitchLog,
+}: {
+  eventLogs: EventLogEntry[]
+  eventLogName: 'System' | 'Application' | 'Security' | 'Setup'
+  onRefresh: () => void
+  onSwitchLog: (name: 'System' | 'Application' | 'Security' | 'Setup') => void
+}) {
+  const [filter, setFilter] = useState<'all' | 'error' | 'warning'>('all')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  // Take the most recent fetch for the currently-selected log.
+  const current = eventLogs.find((e) => e.logName === eventLogName && !e.pending)
+    || eventLogs.find((e) => e.logName === eventLogName)
+    || null
+
+  // Parse the JSON output. If parsing fails (e.g. plain-text fallback from
+  // wevtutil), display it as raw text.
+  let parsedEvents: ParsedEvent[] = []
+  let isPlainText = false
+  if (current?.output && !current.pending) {
+    if (current.output.startsWith('PLAIN_TEXT_FALLBACK:')) {
+      isPlainText = true
+    } else {
+      try {
+        const arr = JSON.parse(current.output)
+        if (Array.isArray(arr)) {
+          parsedEvents = arr
+        }
+      } catch {
+        isPlainText = true
+      }
+    }
+  }
+
+  // Apply level filter
+  const filtered = parsedEvents.filter((e) => {
+    if (filter === 'all') return true
+    const lvl = (e.level || '').toLowerCase()
+    if (filter === 'error') return lvl.includes('error') || lvl.includes('critical')
+    if (filter === 'warning') return lvl.includes('warn')
+    return true
+  })
+
+  // Count by level for the filter badges
+  const counts = {
+    all: parsedEvents.length,
+    error: parsedEvents.filter((e) => (e.level || '').toLowerCase().includes('error') || (e.level || '').toLowerCase().includes('critical')).length,
+    warning: parsedEvents.filter((e) => (e.level || '').toLowerCase().includes('warn')).length,
+  }
+
+  const levelColor = (level?: string): { bg: string; text: string; border: string; dot: string } => {
+    const l = (level || '').toLowerCase()
+    if (l.includes('error') || l.includes('critical')) {
+      return { bg: 'bg-red-950/40', text: 'text-red-300', border: 'border-red-800/50', dot: 'bg-red-500' }
+    }
+    if (l.includes('warn')) {
+      return { bg: 'bg-amber-950/40', text: 'text-amber-300', border: 'border-amber-800/50', dot: 'bg-amber-500' }
+    }
+    if (l.includes('verbose') || l.includes('debug')) {
+      return { bg: 'bg-slate-800/40', text: 'text-slate-400', border: 'border-slate-700/50', dot: 'bg-slate-500' }
+    }
+    return { bg: 'bg-blue-950/30', text: 'text-blue-300', border: 'border-blue-800/40', dot: 'bg-blue-500' }
+  }
+
+  const toggleExpand = (idx: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header: log selector + refresh */}
+      <div className="px-2 py-2 border-b border-slate-800 flex items-center gap-1.5 shrink-0">
+        <select
+          className="bg-slate-800 text-slate-200 text-xs rounded px-2 py-1 border border-slate-700 flex-1"
+          value={eventLogName}
+          onChange={(e) => onSwitchLog(e.target.value as typeof eventLogName)}
+        >
+          <option value="System">System Log</option>
+          <option value="Application">Application Log</option>
+          <option value="Security">Security Log</option>
+          <option value="Setup">Setup Log</option>
+        </select>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-slate-300 hover:text-white"
+          onClick={onRefresh}
+          title="Refresh event logs"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${current?.pending ? 'animate-spin' : ''}`} />
+        </Button>
+      </div>
+
+      {/* Filter pills */}
+      {parsedEvents.length > 0 && (
+        <div className="px-2 py-1.5 border-b border-slate-800 flex items-center gap-1 shrink-0">
+          {(['all', 'error', 'warning'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`text-[10px] px-2 py-0.5 rounded-full transition-colors ${
+                filter === f
+                  ? f === 'error'
+                    ? 'bg-red-900 text-red-200'
+                    : f === 'warning'
+                    ? 'bg-amber-900 text-amber-200'
+                    : 'bg-slate-700 text-slate-100'
+                  : 'bg-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {f === 'all' ? 'All' : f === 'error' ? 'Errors' : 'Warnings'}
+              <span className="ml-1 opacity-70">{counts[f]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Output */}
+      <div className="flex-1 overflow-y-auto scroll-thin">
+        {!current ? (
+          <p className="text-slate-500 text-xs text-center py-8 px-4">
+            No event logs loaded yet.
+            <br />
+            <button onClick={onRefresh} className="text-[#FFC425] hover:underline mt-2">
+              Click here to fetch the latest {eventLogName} events.
+            </button>
+          </p>
+        ) : current.pending ? (
+          <div className="flex flex-col items-center justify-center py-12 text-slate-500">
+            <RefreshCw className="w-6 h-6 animate-spin mb-2 text-[#FFC425]" />
+            <p className="text-xs">Fetching {eventLogName} events…</p>
+          </div>
+        ) : isPlainText ? (
+          // Plain-text fallback (wevtutil / journalctl output)
+          <pre className="text-slate-300 text-[10px] whitespace-pre-wrap break-words p-2 font-mono">
+            {current.output?.replace('PLAIN_TEXT_FALLBACK:\n', '')}
+          </pre>
+        ) : filtered.length === 0 ? (
+          <p className="text-slate-500 text-xs text-center py-8 px-4">
+            No {filter !== 'all' ? `${filter} events ` : ''}found in the {eventLogName} log.
+          </p>
+        ) : (
+          <div className="p-2 space-y-1.5">
+            {filtered.map((evt, i) => {
+              const colors = levelColor(evt.level)
+              const cardKey = `${current.id}-${i}`
+              const isExpanded = expanded.has(cardKey)
+              const message = evt.message || '(no message)'
+              const shouldTruncate = message.length > 120 && !isExpanded
+              return (
+                <div
+                  key={cardKey}
+                  className={`rounded border ${colors.border} ${colors.bg} p-2 cursor-pointer transition-colors hover:bg-opacity-60`}
+                  onClick={() => toggleExpand(cardKey)}
+                >
+                  {/* Top row: time + level badge */}
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${colors.dot}`} />
+                      <span className="text-[10px] text-slate-400 font-mono truncate">
+                        {evt.time || 'unknown time'}
+                      </span>
+                    </div>
+                    {evt.level && (
+                      <span className={`text-[9px] font-semibold uppercase tracking-wide ${colors.text} shrink-0`}>
+                        {evt.level}
+                      </span>
+                    )}
+                  </div>
+                  {/* Provider + Event ID */}
+                  <div className="flex items-center gap-2 mb-1 text-[10px]">
+                    {evt.provider && (
+                      <span className="text-slate-300 truncate" title={evt.provider}>
+                        {evt.provider}
+                      </span>
+                    )}
+                    {evt.id !== undefined && evt.id !== 0 && (
+                      <span className="text-slate-500 font-mono shrink-0">
+                        ID: {evt.id}
+                      </span>
+                    )}
+                  </div>
+                  {/* Message */}
+                  <p className={`text-[11px] text-slate-200 leading-snug ${shouldTruncate ? 'line-clamp-2' : ''}`}>
+                    {message}
+                  </p>
+                  {message.length > 120 && (
+                    <span className="text-[9px] text-[#FFC425] mt-0.5 inline-block">
+                      {isExpanded ? 'Click to collapse' : 'Click to expand'}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Footer: event count */}
+      {parsedEvents.length > 0 && (
+        <div className="px-3 py-1.5 border-t border-slate-800 bg-slate-950/50 shrink-0">
+          <p className="text-[10px] text-slate-500 text-center">
+            Showing {filtered.length} of {parsedEvents.length} events from {eventLogName} log
+          </p>
+        </div>
+      )}
     </div>
   )
 }

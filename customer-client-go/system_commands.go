@@ -154,13 +154,17 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 // has fully connected and is streaming. This avoids the black-screen
                 // issue where the old process shuts down before the new one is ready.
                 markerFile := filepath.Join(os.TempDir(), "marqueeit-elevated-ready.txt")
+                logFile := filepath.Join(os.TempDir(), "marqueeit-elevated-log.txt")
                 os.Remove(markerFile) // clear any stale marker
+                os.Remove(logFile)
 
-                // Set the marker path as an env var in the PowerShell session so the
-                // elevated child process inherits it. Start-Process -Verb RunAs spawns
-                // an elevated process that inherits the parent's environment.
-                psCmd := fmt.Sprintf(`$env:MARQUEEIT_READY_MARKER='%s'; Start-Process -FilePath "%s" -ArgumentList '-code','%s','-name','%s','-server','%s' -Verb RunAs`,
-                        markerFile, exe, globalClient.code, globalClient.name, globalClient.serverURL)
+                // Pass the marker path AND a log path as CLI args. The new process
+                // will write progress to the log file so we can diagnose failures.
+                // CLI args are the ONLY reliable way to pass data through
+                // Start-Process -Verb RunAs (env vars don't propagate).
+                psCmd := fmt.Sprintf(
+                        `Start-Process -FilePath "%s" -ArgumentList '-code','%s','-name','%s','-server','%s','-ready-marker','%s','-elevated-log','%s' -Verb RunAs`,
+                        exe, globalClient.code, globalClient.name, globalClient.serverURL, markerFile, logFile)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
@@ -170,10 +174,11 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         return
                 }
                 sendJSON(map[string]interface{}{"type": "elevate-result", "result": "restarting"})
-                // Wait for the new process to signal readiness (up to 20 seconds).
-                // UAC prompt + process startup + WS dial + first capture can take a while.
+                // Wait for the new process to signal readiness (up to 60 seconds).
+                // UAC prompt + AV scan + process startup + WS dial + first capture
+                // can take a while on slow machines. 60s gives plenty of room.
                 ready := false
-                for i := 0; i < 40; i++ { // 40 * 500ms = 20s
+                for i := 0; i < 120; i++ { // 120 * 500ms = 60s
                         if _, err := os.Stat(markerFile); err == nil {
                                 ready = true
                                 break
@@ -182,16 +187,25 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 }
                 if !ready {
                         // New process never started (user likely clicked No on UAC, or it
-                        // failed to connect). Keep the old process running so the session
-                        // isn't lost. Tell the technician what happened.
+                        // failed to connect, or AV blocked it, or the 60s timeout expired).
+                        // Keep the old process running so the session isn't lost.
+                        // Read the log file (if any) to give the technician more info.
+                        logContent, _ := os.ReadFile(logFile)
+                        logStr := strings.TrimSpace(string(logContent))
+                        msg := "error: elevation did not complete in 60s. The customer may have clicked No on the UAC prompt, antivirus may have blocked the new process, or the machine is slow. The current (non-elevated) session is still active."
+                        if logStr != "" {
+                                msg += "\n\nElevated process log:\n" + logStr
+                        }
                         sendJSON(map[string]interface{}{
                                 "type":   "elevate-result",
-                                "result": "error: elevation cancelled or failed — keeping current session",
+                                "result": msg,
                         })
+                        os.Remove(logFile)
                         return
                 }
                 // New process is ready — safe to shut down the old one.
                 os.Remove(markerFile)
+                os.Remove(logFile)
                 globalClient.shutdown()
 
         // --- Remove unattended service ---
@@ -658,8 +672,13 @@ func rebootMachine() {
 
 // getEventLogs retrieves the most recent Windows Event log entries from the
 // specified log (System, Application, Security, Setup, etc.).
-// Uses Get-WinEvent via hidden PowerShell for rich, structured output.
-// Falls back to wevtutil (a native Windows tool) if PowerShell is unavailable.
+// Returns a structured JSON array so the technician UI can render each event
+// as a clean card (instead of a cramped fixed-width table that doesn't fit
+// in a narrow sidebar).
+//
+// Each event has: time, id, level, provider, message.
+// Falls back to wevtutil (a native Windows tool) if PowerShell is unavailable,
+// in which case the output is plain text.
 func getEventLogs(logName string, maxEvents int) string {
         if maxEvents <= 0 {
                 maxEvents = 50
@@ -669,42 +688,66 @@ func getEventLogs(logName string, maxEvents int) string {
         }
         switch runtime.GOOS {
         case "windows":
-                // Try Get-WinEvent first — gives the cleanest table output.
+                // Use ConvertTo-Json so the technician UI can render each event as a card.
+                // We select and RENAME properties to lowercase so the JSON keys match
+                // what the UI expects (time, id, level, provider, message).
                 psScript := fmt.Sprintf(
                         "$evts = Get-WinEvent -LogName '%s' -MaxEvents %d -ErrorAction SilentlyContinue; "+
                                 "if ($evts) { "+
-                                "$evts | Select-Object TimeCreated, Id, LevelDisplayName, ProviderName, @{N='Message';E={$_.Message -replace '\\s+',' ' -replace '\\r?\\n',' ' | Out-String}} | "+
-                                "Format-Table -AutoSize -Wrap | Out-String -Width 4096 "+
-                                "} else { 'No events found in log: %s' }",
-                        logName, maxEvents, logName)
+                                "$evts | Select-Object "+
+                                "@{N='time';E={$_.TimeCreated.ToString('yyyy-MM-dd HH:mm:ss')}}, "+
+                                "@{N='id';E={$_.Id}}, "+
+                                "@{N='level';E={$_.LevelDisplayName}}, "+
+                                "@{N='provider';E={$_.ProviderName}}, "+
+                                "@{N='message';E={($_.Message -replace '\\r\\n',' ' -replace '\\n',' ' -replace '\\s+',' ').Trim()}} | "+
+                                "ConvertTo-Json -Compress -Depth 2 "+
+                                "} else { '[]' }",
+                        logName, maxEvents)
                 out, err := winExecPowerShellHidden(psScript)
-                if err == nil && strings.TrimSpace(out) != "" {
-                        return out
+                if err == nil {
+                        trimmed := strings.TrimSpace(out)
+                        // If Get-WinEvent returned a single event, ConvertTo-Json returns an
+                        // object instead of an array. Wrap it so the UI can always JSON.parse
+                        // to an array. We detect this by checking if trimmed starts with '{'.
+                        if trimmed != "" && trimmed != "[]" {
+                                if trimmed[0] == '{' {
+                                        trimmed = "[" + trimmed + "]"
+                                }
+                                return trimmed
+                        }
+                        // Empty or '[]' — return as-is so the UI shows "no events".
+                        if trimmed == "" {
+                                return "[]"
+                        }
+                        return trimmed
                 }
                 // Fallback to wevtutil (native command, no PowerShell dependency)
+                // Returns plain text — the UI will display it in a <pre> block.
+                // Uses winExecHidden for cross-platform compatibility (the HideWindow
+                // and CreationFlags fields only exist on Windows syscall.SysProcAttr).
                 wevtOut, _ := winExecHidden(
                         fmt.Sprintf("wevtutil qe %s /c:%d /f:text /rd:true /q:*[System[(Level=1 or Level=2 or Level=3 or Level=4 or Level=0)]]",
                                 logName, maxEvents))
                 if len(wevtOut) > 0 {
-                        return wevtOut
+                        // Mark as plain-text fallback so the UI knows not to JSON-parse it.
+                        return "PLAIN_TEXT_FALLBACK:\n" + wevtOut
                 }
-                return "[error] Could not retrieve event logs. PowerShell error: " + err.Error()
+                return fmt.Sprintf("[{\"time\":\"-\",\"id\":0,\"level\":\"Error\",\"provider\":\"MarqueeIT\",\"message\":\"Could not retrieve event logs. PowerShell error: %s\"}]", err.Error())
         case "linux":
-                // journalctl — the closest Linux equivalent to Event Viewer
+                // journalctl — return as plain text (Linux support is secondary)
                 cmd := exec.Command("journalctl", "-n", fmt.Sprintf("%d", maxEvents), "--no-pager", "-o", "short-iso")
                 out, err := cmd.Output()
                 if err != nil {
-                        return "[error] " + err.Error()
+                        return fmt.Sprintf("[{\"time\":\"-\",\"id\":0,\"level\":\"Error\",\"provider\":\"journalctl\",\"message\":\"%s\"}]", err.Error())
                 }
-                return string(out)
+                return "PLAIN_TEXT_FALLBACK:\n" + string(out)
         case "darwin":
-                // macOS — use log show
                 cmd := exec.Command("log", "show", "--last", "1h", "--style", "compact")
                 out, err := cmd.Output()
                 if err != nil {
-                        return "[error] " + err.Error()
+                        return fmt.Sprintf("[{\"time\":\"-\",\"id\":0,\"level\":\"Error\",\"provider\":\"log\",\"message\":\"%s\"}]", err.Error())
                 }
-                return string(out)
+                return "PLAIN_TEXT_FALLBACK:\n" + string(out)
         }
-        return "[error] Unsupported OS for event logs"
+        return "[{\"time\":\"-\",\"id\":0,\"level\":\"Error\",\"provider\":\"MarqueeIT\",\"message\":\"Unsupported OS for event logs\"}]"
 }

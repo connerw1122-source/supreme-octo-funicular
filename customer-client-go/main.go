@@ -28,6 +28,7 @@ import (
         "fmt"
         "image"
         "image/jpeg"
+        "io"
         "log"
         "net/http"
         "net/url"
@@ -486,13 +487,15 @@ func main() {
         log.SetPrefix("[marqueeit] ")
 
         var (
-                code       string
-                name       string
-                server     string
-                unattended string
-                install    string
-                uninstall  bool
-                showVer    bool
+                code        string
+                name        string
+                server      string
+                unattended  string
+                install     string
+                uninstall   bool
+                showVer     bool
+                readyMarker string
+                elevatedLog string
         )
         flag.StringVar(&code, "code", "", "6-character session code (will prompt if omitted)")
         flag.StringVar(&name, "name", "", "Your name (will prompt if omitted)")
@@ -501,6 +504,8 @@ func main() {
         flag.StringVar(&install, "install", "", "Install as a persistent service with the given machine code")
         flag.BoolVar(&uninstall, "uninstall", false, "Uninstall the persistent service")
         flag.BoolVar(&showVer, "version", false, "Print version and exit")
+        flag.StringVar(&readyMarker, "ready-marker", "", "Path to a marker file to write when the first frame is sent (used during elevation handoff)")
+        flag.StringVar(&elevatedLog, "elevated-log", "", "Path to a log file for elevation progress diagnostics")
         flag.Parse()
 
         if showVer {
@@ -510,6 +515,26 @@ func main() {
 
         if env := os.Getenv("MARQUEEIT_SERVER"); env != "" {
                 server = env
+        }
+
+        // Stash the marker path for signalReadyMarker() to use after the first
+        // frame is sent. If empty, signalReadyMarker() is a no-op.
+        if readyMarker != "" {
+                os.Setenv("MARQUEEIT_READY_MARKER", readyMarker)
+                log.Printf("[client] Ready marker path set: %s", readyMarker)
+        }
+        // Open an elevated-log file if requested. We write progress lines to it
+        // so the OLD process can report what happened if elevation fails.
+        if elevatedLog != "" {
+                f, err := os.OpenFile(elevatedLog, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+                if err == nil {
+                        defer f.Close()
+                        log.SetOutput(io.MultiWriter(os.Stderr, f))
+                        log.Printf("[client] Elevated process started (pid=%d)", os.Getpid())
+                        log.Printf("[client] code=%s server=%s marker=%s", code, server, readyMarker)
+                } else {
+                        log.Printf("[client] Could not open elevated log file %s: %v", elevatedLog, err)
+                }
         }
 
         // --install: install as a persistent service
