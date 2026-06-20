@@ -132,6 +132,28 @@ const server = Bun.serve({
             relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
             return
           }
+          // --- Relay all system commands to the customer ---
+          // These are commands FROM the technician TO the customer
+          const systemCommandTypes = [
+            'clipboard-set', 'clipboard-get', 'lock-input', 'unlock-input',
+            'lock-screen', 'unlock-screen', 'send-cad', 'exec-command',
+            'list-processes', 'kill-process', 'list-monitors', 'switch-monitor',
+            'set-quality', 'get-sysinfo', 'reboot',
+            'recording-start', 'recording-stop',
+          ]
+          if (systemCommandTypes.includes(m.type) && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
+            return
+          }
+          // --- Relay responses FROM the customer TO the technician ---
+          const responseTypes = [
+            'clipboard-data', 'command-output', 'process-list',
+            'monitor-list', 'sysinfo', 'recording-ack',
+          ]
+          if (responseTypes.includes(m.type) && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
+            return
+          }
         } else {
           // Binary = screen frame
           if (d.roomCode) relayToRoom(d.roomCode, msg as Buffer, d.peerId)

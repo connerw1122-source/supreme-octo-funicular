@@ -26,7 +26,6 @@ import (
         "encoding/json"
         "flag"
         "fmt"
-        "image"
         "image/jpeg"
         "io"
         "log"
@@ -76,13 +75,15 @@ type Client struct {
 }
 
 func NewClient(serverURL, code, name string) *Client {
-        return &Client{
+        c := &Client{
                 serverURL: strings.TrimRight(serverURL, "/"),
                 code:      strings.ToUpper(strings.TrimSpace(code)),
                 name:      name,
                 hostname:  hostname(),
                 os:        runtime.GOOS + " " + runtime.GOARCH,
         }
+        globalClient = c
+        return c
 }
 
 func (c *Client) Log(format string, args ...interface{}) {
@@ -179,27 +180,25 @@ func (c *Client) Connect() error {
 func (c *Client) screenLoop() {
         defer c.wg.Done()
 
-        rect := image.Rect(0, 0, 1920, 1080)
-        if probe, err := screenshot.CaptureDisplay(0); err == nil {
-                rect = probe.Bounds()
-        }
-        c.Log("Streaming screen at %dx%d, ~30 FPS", rect.Dx(), rect.Dy())
-
-        ticker := time.NewTicker(33 * time.Millisecond) // ~30 FPS
-        defer ticker.Stop()
+        c.Log("Streaming screen at ~30 FPS (adjustable via set-quality)")
 
         for {
                 select {
                 case <-c.ctx.Done():
                         return
-                case <-ticker.C:
-                        img, err := screenshot.CaptureDisplay(0)
+                case <-time.After(time.Duration(targetFPS) * time.Millisecond):
+                        // Use currentMonitor (switchable via switch-monitor command)
+                        monIdx := currentMonitor
+                        if monIdx >= screenshot.NumActiveDisplays() {
+                                monIdx = 0
+                        }
+                        img, err := screenshot.CaptureDisplay(monIdx)
                         if err != nil {
                                 c.Log("Capture error: %v", err)
                                 continue
                         }
                         var buf bytes.Buffer
-                        if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 55}); err != nil {
+                        if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
                                 c.Log("JPEG encode error: %v", err)
                                 continue
                         }
@@ -282,6 +281,21 @@ func (c *Client) readLoop() {
                         c.shutdown()
                         selfUninstall()
                         return
+                default:
+                        // Try to parse as a system command (clipboard, lock, CMD, etc.)
+                        var sysMsg map[string]interface{}
+                        if err := json.Unmarshal(data, &sysMsg); err == nil {
+                                if sysType, ok := sysMsg["type"].(string); ok {
+                                        switch sysType {
+                                        case "clipboard-set", "clipboard-get", "lock-input", "unlock-input",
+                                                "lock-screen", "unlock-screen", "send-cad", "exec-command",
+                                                "list-processes", "kill-process", "list-monitors", "switch-monitor",
+                                                "set-quality", "get-sysinfo", "reboot",
+                                                "recording-start", "recording-stop":
+                                                HandleSystemCommand(sysMsg)
+                                        }
+                                }
+                        }
                 }
         }
 }
