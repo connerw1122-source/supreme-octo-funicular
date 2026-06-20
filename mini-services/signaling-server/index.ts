@@ -1,3 +1,6 @@
+// MarqueeIT Signaling Server — Bun native WebSocket
+// Uses Bun.serve with built-in WebSocket support for maximum stability.
+
 interface WsData {
   role: 'technician' | 'customer'
   name: string
@@ -64,39 +67,23 @@ function joinRoom(ws: any, roomCode: string, role: 'technician' | 'customer', na
 const server = Bun.serve({
   port: 3003,
   hostname: '0.0.0.0',
-  // Disable permessage-deflate to avoid Bun crash with browser clients
-  permessageDeflate: false,
   fetch(req, srv) {
-    console.log(`[http] ${req.method} ${req.url}`)
-    try {
-      const code = (req.headers.get('x-marqueeit-code') || '').toUpperCase().trim()
-      const name = req.headers.get('x-marqueeit-name') || ''
-      const role = (req.headers.get('x-marqueeit-role') || 'customer') as 'technician' | 'customer'
-      const data: WsData = {
-        role, name, roomCode: code,
-        peerId: `peer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        joinedAt: Date.now(),
-      }
-      const ok = srv.upgrade(req, { data })
-      console.log(`[http] upgrade result: ${ok}`)
-      if (ok) return
-      return new Response('hi')
-    } catch (err) {
-      console.error('[http] error:', err)
-      return new Response('error', { status: 500 })
+    const code = (req.headers.get('x-marqueeit-code') || '').toUpperCase().trim()
+    const name = req.headers.get('x-marqueeit-name') || ''
+    const role = (req.headers.get('x-marqueeit-role') || 'customer') as 'technician' | 'customer'
+    const data: WsData = {
+      role, name, roomCode: code,
+      peerId: `peer-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      joinedAt: Date.now(),
     }
+    if (srv.upgrade(req, { data })) return
+    if (req.url.includes('/health')) return new Response('ok')
+    return new Response('MarqueeIT Signaling Server', { status: 200 })
   },
   websocket: {
     open(ws) {
-      console.log('[ws] open')
-      try {
-        const d = ws.data as WsData
-        if (d.roomCode) {
-          joinRoom(ws, d.roomCode, d.role, d.name || 'Customer')
-        }
-      } catch (err) {
-        console.error('[ws] open error:', err)
-      }
+      const d = ws.data as WsData
+      if (d.roomCode) joinRoom(ws, d.roomCode, d.role, d.name || 'Customer')
     },
     message(ws, msg) {
       try {
@@ -133,16 +120,21 @@ const server = Bun.serve({
             relayToRoom(d.roomCode, JSON.stringify({ type: 'session-ended' }), d.peerId)
             return
           }
+          if (m.type === 'self-uninstall' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify({ type: 'self-uninstall' }), d.peerId)
+            return
+          }
           if (m.type === 'stream-ready' && d.roomCode) {
             relayToRoom(d.roomCode, JSON.stringify({ type: 'stream-ready', from: d.peerId }), d.peerId)
             return
           }
-        } else {
-          // Binary = screen frame. Convert to Uint8Array for safe forwarding.
-          if (d.roomCode) {
-            const u8 = new Uint8Array(msg as ArrayBuffer)
-            relayToRoom(d.roomCode, u8, d.peerId)
+          if (m.type === 'machine-specs' && d.roomCode) {
+            relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
+            return
           }
+        } else {
+          // Binary = screen frame
+          if (d.roomCode) relayToRoom(d.roomCode, msg as Buffer, d.peerId)
         }
       } catch (err) {
         console.error('[ws] message error:', err)
@@ -151,7 +143,7 @@ const server = Bun.serve({
     close(ws) {
       try {
         const d = ws.data as WsData
-        if (d.roomCode) {
+        if (d && d.roomCode) {
           getRoom(d.roomCode).delete(d.peerId)
           relayToRoom(d.roomCode, JSON.stringify({ type: 'peer-left', id: d.peerId, name: d.name }))
           broadcastPresence(d.roomCode)
@@ -161,12 +153,10 @@ const server = Bun.serve({
         console.error('[ws] close error:', err)
       }
     },
-    error(ws, error) {
-      console.error('[ws] socket error:', error)
-    },
   },
 })
 
-console.log(`Signaling server on port 3003`)
-process.on('SIGTERM', () => { server.stop(); process.exit(0) })
-process.on('SIGINT', () => { server.stop(); process.exit(0) })
+console.log(`Signaling server on port 3003 (Bun native WS)`)
+
+process.on('SIGTERM', () => { console.log('SIGTERM'); server.stop(); process.exit(0) })
+process.on('SIGINT', () => { console.log('SIGINT'); server.stop(); process.exit(0) })
