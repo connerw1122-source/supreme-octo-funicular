@@ -57,7 +57,12 @@ func winSetClipboard(text string) {
 func winGetClipboard() string {
         wtext := C.getClipboardText()
         // Convert wchar_t* back to Go string
-        return syscall.UTF16ToString((*uint16)(unsafe.Pointer(wtext)))
+        // unsafe.Slice creates a []uint16 from the pointer; UTF16ToString stops at null
+        ptr := (*uint16)(unsafe.Pointer(wtext))
+        if ptr == nil {
+                return ""
+        }
+        return syscall.UTF16ToString(unsafe.Slice(ptr, 1<<20))
 }
 
 func winBlockInput(block bool) bool {
