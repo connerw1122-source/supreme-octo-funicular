@@ -7,35 +7,34 @@ package main
 #include <windows.h>
 #include <string.h>
 
-// Set the clipboard text via Win32 API (no PowerShell, no flashing window)
-static int setClipboardText(const char* text, int len) {
+// Set the clipboard text via Win32 API (Unicode, no PowerShell, no flashing)
+static int setClipboardText(const wchar_t* text, int len) {
     if (!OpenClipboard(NULL)) return 0;
     EmptyClipboard();
-    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, len + 1);
+    // +1 for null terminator
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, (len + 1) * sizeof(wchar_t));
     if (!hMem) { CloseClipboard(); return 0; }
-    char* pMem = (char*)GlobalLock(hMem);
-    memcpy(pMem, text, len);
+    wchar_t* pMem = (wchar_t*)GlobalLock(hMem);
+    memcpy(pMem, text, len * sizeof(wchar_t));
     pMem[len] = 0;
     GlobalUnlock(hMem);
-    SetClipboardData(CF_TEXT, hMem);
+    SetClipboardData(CF_UNICODETEXT, hMem);
     CloseClipboard();
     return 1;
 }
 
-// Get clipboard text via Win32 API
-static const char* getClipboardText() {
-    if (!OpenClipboard(NULL)) return "";
-    HANDLE hData = GetClipboardData(CF_TEXT);
-    if (!hData) { CloseClipboard(); return ""; }
-    const char* text = (const char*)GlobalLock(hData);
-    // Note: caller must not free this — it's owned by the clipboard.
-    // We copy it in Go before closing.
+// Get clipboard text via Win32 API (Unicode)
+static const wchar_t* getClipboardText() {
+    if (!OpenClipboard(NULL)) return L"";
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData) { CloseClipboard(); return L""; }
+    const wchar_t* text = (const wchar_t*)GlobalLock(hData);
     GlobalUnlock(hData);
     CloseClipboard();
     return text;
 }
 
-// BlockInput — blocks keyboard and mouse input on the customer's machine
+// BlockInput
 static int blockInput(int block) {
     return BlockInput(block ? TRUE : FALSE);
 }
@@ -49,14 +48,16 @@ import (
 )
 
 func winSetClipboard(text string) {
-        cText := C.CString(text)
-        defer C.free(unsafe.Pointer(cText))
-        C.setClipboardText(cText, C.int(len(text)))
+        // Convert Go string to UTF-16 (what Windows uses)
+        wstr, _ := syscall.UTF16PtrFromString(text)
+        length := len([]rune(text))
+        C.setClipboardText((*C.wchar_t)(unsafe.Pointer(wstr)), C.int(length))
 }
 
 func winGetClipboard() string {
-        text := C.getClipboardText()
-        return C.GoString(text)
+        wtext := C.getClipboardText()
+        // Convert wchar_t* back to Go string
+        return syscall.UTF16ToString((*uint16)(unsafe.Pointer(wtext)))
 }
 
 func winBlockInput(block bool) bool {

@@ -272,6 +272,8 @@ func (c *Client) readLoop() {
                         }
                 case "chat", "chat-message":
                         c.Log("[chat] %s: %s", envelope.Sender, envelope.Content)
+                        // Show a message box on the customer's machine so they can see it
+                        showMessageBox("MarqueeIT - Message from "+envelope.Sender, envelope.Content)
                 case "session-ended", "end-session":
                         c.Log("Session ended by technician")
                         c.shutdown()

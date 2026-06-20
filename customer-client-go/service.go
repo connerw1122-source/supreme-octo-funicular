@@ -15,6 +15,7 @@ import (
         "os/exec"
         "path/filepath"
         "runtime"
+        "syscall"
         "time"
 )
 
@@ -69,6 +70,50 @@ func generateMachineCode() string {
                 time.Sleep(time.Nanosecond)
         }
         return string(b)
+}
+
+// installServiceElevated installs the service with admin privileges.
+// On Windows, triggers a UAC prompt. On Linux/Mac, uses sudo.
+func installServiceElevated(machineCode, serverURL string) error {
+        exe, err := os.Executable()
+        if err != nil {
+                return fmt.Errorf("cannot find executable: %w", err)
+        }
+
+        if runtime.GOOS == "windows" {
+                // Build the sc create command
+                serviceName := "MarqueeIT"
+                binPath := fmt.Sprintf(`"%s" --unattended %s --server %s`, exe, machineCode, serverURL)
+
+                // Write a batch file that creates the service
+                tmpBat := filepath.Join(os.TempDir(), "marqueeit-install-svc.bat")
+                bat := fmt.Sprintf(`@echo off
+sc stop "%s" 2>nul
+sc delete "%s" 2>nul
+sc create "%s" binPath= %s start= auto displayname= "MarqueeIT Remote Support"
+sc start "%s"
+`, serviceName, serviceName, serviceName, binPath, serviceName)
+                os.WriteFile(tmpBat, []byte(bat), 0644)
+
+                // Show UAC prompt
+                showMessageBox("MarqueeIT - Admin Required",
+                        "To install unattended access, Windows needs administrator privileges.\n\nPlease click YES on the UAC prompt.")
+
+                // Run elevated via PowerShell
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpBat)
+                cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
+                cmd.SysProcAttr = &syscall.SysProcAttr{}
+                hideWindow(cmd.SysProcAttr)
+                err := cmd.Run()
+                os.Remove(tmpBat)
+                if err != nil {
+                        return fmt.Errorf("elevated install failed: %w", err)
+                }
+                return nil
+        }
+
+        // Linux/Mac: use sudo
+        return installService(machineCode, serverURL)
 }
 
 // uninstallService removes the system service.

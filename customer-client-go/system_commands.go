@@ -8,7 +8,10 @@ import (
         "context"
         "encoding/json"
         "fmt"
+        "net/http"
+        "os"
         "os/exec"
+        "path/filepath"
         "runtime"
         "strings"
         "syscall"
@@ -27,6 +30,12 @@ func HandleSystemCommand(msg map[string]interface{}) {
         case "clipboard-set":
                 text, _ := msg["text"].(string)
                 setClipboard(text)
+                // Confirm to technician
+                sendJSON(map[string]interface{}{
+                        "type":   "clipboard-data",
+                        "text":   text,
+                        "source": "set-confirm",
+                })
 
         case "clipboard-get":
                 text := getClipboard()
@@ -54,7 +63,13 @@ func HandleSystemCommand(msg map[string]interface{}) {
         // --- Remote CMD/PowerShell ---
         case "exec-command":
                 command, _ := msg["command"].(string)
-                result := execRemoteCommand(command)
+                elevated, _ := msg["elevated"].(bool)
+                var result string
+                if elevated {
+                        result = execElevatedCommand(command)
+                } else {
+                        result = execRemoteCommand(command)
+                }
                 sendJSON(map[string]interface{}{
                         "type":   "command-output",
                         "output": result,
@@ -115,14 +130,32 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 if serverURL == "" {
                         serverURL = globalClient.serverURL
                 }
-                err := installService("", serverURL)
+                // Register with server first
+                registerURL := fmt.Sprintf("%s/api/unattended", serverURL)
+                regBody, _ := json.Marshal(map[string]string{
+                        "customerName": hostname(),
+                })
+                resp, regErr := http.Post(registerURL, "application/json", bytes.NewReader(regBody))
+                machineCode := ""
+                if regErr == nil {
+                        var result struct {
+                                MachineCode string `json:"machineCode"`
+                        }
+                        json.NewDecoder(resp.Body).Decode(&result)
+                        resp.Body.Close()
+                        machineCode = result.MachineCode
+                }
+
+                // Install the service (elevated on Windows)
+                err := installServiceElevated(machineCode, serverURL)
                 result := "installed"
                 if err != nil {
                         result = "error: " + err.Error()
                 }
                 sendJSON(map[string]interface{}{
-                        "type":   "unattended-result",
-                        "result": result,
+                        "type":        "unattended-result",
+                        "result":      result,
+                        "machineCode": machineCode,
                 })
         }
 }
@@ -254,6 +287,46 @@ func execRemoteCommand(command string) string {
                 output += "\n[error]\n" + err.Error()
         }
         return output
+}
+
+// execElevatedCommand runs a command with admin privileges via UAC prompt.
+// On Windows, uses ShellExecute with "runas" verb (shows UAC dialog).
+// On Linux/Mac, uses sudo.
+func execElevatedCommand(command string) string {
+        if runtime.GOOS == "windows" {
+                // Write the command to a temp .bat file, then execute it elevated
+                tmpBat := filepath.Join(os.TempDir(), "marqueeit-elevated.bat")
+                batContent := "@echo off\n" + command + "\n"
+                // Redirect output to a temp file so we can read it back
+                tmpOut := filepath.Join(os.TempDir(), "marqueeit-elevated-out.txt")
+                batContent += "> \"" + tmpOut + "\" 2>&1"
+                os.WriteFile(tmpBat, []byte(batContent), 0644)
+
+                // Use ShellExecute with "runas" to trigger UAC
+                showMessageBox("MarqueeIT - UAC Required",
+                        "Your technician is requesting administrator privileges to run:\n\n"+command+
+                                "\n\nPlease click YES on the UAC prompt.")
+
+                // Execute via PowerShell Start-Process -Verb RunAs
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpBat)
+                cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
+                cmd.SysProcAttr = &syscall.SysProcAttr{}
+                hideWindow(cmd.SysProcAttr)
+                cmd.Run()
+
+                // Read the output file
+                out, _ := os.ReadFile(tmpOut)
+                os.Remove(tmpBat)
+                os.Remove(tmpOut)
+                return string(out)
+        }
+        // Linux/Mac: use sudo
+        cmd := exec.Command("sudo", "sh", "-c", command)
+        out, err := cmd.Output()
+        if err != nil {
+                return fmt.Sprintf("[error] %s\n%s", err.Error(), string(out))
+        }
+        return string(out)
 }
 
 // --- Process listing (Task Manager) ---

@@ -106,6 +106,7 @@ export function SessionView({
   const [activeTab, setActiveTab] = useState<'info' | 'cmd' | 'tasks' | 'clipboard'>('info')
   const [clipboardHistory, setClipboardHistory] = useState<{ id: string; text: string; direction: 'in' | 'out'; timestamp: string }[]>([])
   const [cmdInput, setCmdInput] = useState('')
+  const [cmdElevated, setCmdElevated] = useState(false)
   const [cmdOutput, setCmdOutput] = useState<{ id: string; command: string; output: string }[]>([])
   const [processList, setProcessList] = useState<{ pid: number; name: string; cpu: string; memory: string }[]>([])
   const [monitors, setMonitors] = useState<{ index: number; width: number; height: number }[]>([])
@@ -121,7 +122,12 @@ export function SessionView({
   const drawFrameRef = useRef<(buffer: ArrayBuffer) => void>(() => {})
   const lastMouseMoveRef = useRef<number>(0)
   const pressedKeysRef = useRef<Set<string>>(new Set())
+  // --- Send system commands to the customer ---
+  // Declared early so the WS onmessage handler can use it
   const wsRef = useRef<WebSocket | null>(null)
+  const sendSystemCommand = useCallback((msg: Record<string, any>) => {
+    wsRef.current?.send(JSON.stringify(msg))
+  }, [])
 
   // -------------------------------------------------------------------------
   // Connect to signaling server via plain WebSocket (browser technician side)
@@ -179,6 +185,10 @@ export function SessionView({
             if (msg.role === 'customer') {
               setCustomerConnected(true)
               toast.success(`${msg.name} connected`)
+              // Auto-grab system info when customer connects
+              setTimeout(() => sendSystemCommand({ type: 'get-sysinfo' }), 1000)
+              // Auto-list monitors
+              setTimeout(() => sendSystemCommand({ type: 'list-monitors' }), 1500)
             }
             break
           case 'peer-left':
@@ -376,10 +386,7 @@ export function SessionView({
     return true
   }, [])
 
-  // --- Send system commands to the customer ---
-  const sendSystemCommand = useCallback((msg: Record<string, any>) => {
-    wsRef.current?.send(JSON.stringify(msg))
-  }, [])
+  // sendSystemCommand is declared above (before the WS effect)
 
   const sendClipboard = useCallback((text: string) => {
     sendSystemCommand({ type: 'clipboard-set', text })
@@ -399,9 +406,9 @@ export function SessionView({
   const execCommand = useCallback(() => {
     if (!cmdInput.trim()) return
     const id = Math.random().toString(36).slice(2)
-    sendSystemCommand({ type: 'exec-command', command: cmdInput.trim(), id })
+    sendSystemCommand({ type: 'exec-command', command: cmdInput.trim(), id, elevated: cmdElevated })
     setCmdInput('')
-  }, [cmdInput, sendSystemCommand])
+  }, [cmdInput, cmdElevated, sendSystemCommand])
 
   const refreshProcesses = useCallback(() => {
     sendSystemCommand({ type: 'list-processes' })
@@ -851,9 +858,6 @@ export function SessionView({
               <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={refreshMonitors} title="List monitors">
                 <MonitorSmartphone className="w-3.5 h-3.5" />
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-slate-300 hover:text-white" onClick={getExpandedInfo} title="Get system info">
-                <Cpu className="w-3.5 h-3.5" />
-              </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
                 <MonitorSmartphone className="w-3.5 h-3.5" />
               </Button>
@@ -1006,17 +1010,28 @@ export function SessionView({
                     ))
                   )}
                 </div>
-                <div className="border-t border-slate-800 p-2 flex gap-1">
-                  <Input
-                    value={cmdInput}
-                    onChange={(e) => setCmdInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') execCommand() }}
-                    placeholder="Enter command..."
-                    className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8 font-mono"
-                  />
-                  <Button size="sm" onClick={execCommand} disabled={!cmdInput.trim()} className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2">
-                    <Send className="w-3.5 h-3.5" />
-                  </Button>
+                <div className="border-t border-slate-800 p-2 space-y-1.5">
+                  <label className="flex items-center gap-1.5 text-[10px] text-slate-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={cmdElevated}
+                      onChange={(e) => setCmdElevated(e.target.checked)}
+                      className="w-3 h-3"
+                    />
+                    Run as Administrator (shows UAC prompt on customer's machine)
+                  </label>
+                  <div className="flex gap-1">
+                    <Input
+                      value={cmdInput}
+                      onChange={(e) => setCmdInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') execCommand() }}
+                      placeholder="Enter command..."
+                      className="bg-slate-800 border-slate-700 text-slate-100 text-xs h-8 font-mono"
+                    />
+                    <Button size="sm" onClick={execCommand} disabled={!cmdInput.trim()} className="bg-[#1B3A6B] hover:bg-[#0F2A52] h-8 px-2">
+                      <Send className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
