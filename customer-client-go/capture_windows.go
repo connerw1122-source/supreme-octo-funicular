@@ -75,6 +75,8 @@ import "C"
 import (
 	"image"
 	"unsafe"
+
+	"github.com/kbinani/screenshot"
 )
 
 // captureScreenWindows captures the active desktop (including lock screen)
