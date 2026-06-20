@@ -47,10 +47,17 @@ RUN mkdir -p /out && \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/marqueeit-client-linux . && \
     # 2. Linux Wayland (view-only, no input injection)
     CGO_ENABLED=1 go build -tags wayland -ldflags="-s -w" -o /out/marqueeit-client-linux-wayland . && \
-    # 3. Windows (CGO + MinGW for SendInput, static linking, no console window)
+    # 3. Windows (CGO + MinGW for SendInput, no console window)
+    #    Includes version info + manifest to reduce AV false positives.
+    #    Note: we DON'T use -s -w here because stripping debug info makes
+    #    AV engines MORE suspicious (looks like obfuscation).
+    #    First, compile the version info resource with windres:
+    x86_64-w64-mingw32-windres versioninfo.rc -O coff -o versioninfo.syso && \
+    x86_64-w64-mingw32-windres app.manifest -O coff -o appmanifest.syso && \
     CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
-        go build -ldflags="-s -w -H windowsgui -extldflags=-static -linkmode external" \
+        go build -ldflags="-H windowsgui -extldflags=-static -linkmode external" \
         -o /out/marqueeit-client-windows.exe . && \
+    rm -f versioninfo.syso appmanifest.syso && \
     # 4. macOS (CGO disabled, input stubbed)
     CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-mac .
 
