@@ -141,6 +141,7 @@ const server = Bun.serve({
             'set-quality', 'get-sysinfo', 'reboot',
             'recording-start', 'recording-stop',
             'install-unattended', 'elevate-session', 'remove-unattended',
+            'get-event-logs',
           ]
           if (systemCommandTypes.includes(m.type) && d.roomCode) {
             relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
@@ -151,6 +152,7 @@ const server = Bun.serve({
             'clipboard-data', 'command-output', 'process-list',
             'monitor-list', 'sysinfo', 'recording-ack',
             'unattended-result', 'elevate-result',
+            'event-logs',
           ]
           if (responseTypes.includes(m.type) && d.roomCode) {
             relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)

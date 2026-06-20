@@ -73,43 +73,85 @@ static const char* getActiveDesktopName() {
 import "C"
 
 import (
-	"image"
-	"unsafe"
+        "image"
+        "unsafe"
 
-	"github.com/kbinani/screenshot"
+        "github.com/kbinani/screenshot"
 )
 
 // captureScreenWindows captures the active desktop (including lock screen)
-// using OpenInputDesktop + BitBlt.
+// using OpenInputDesktop + BitBlt. If the capture returns all-black pixels
+// (which can happen briefly during elevation/UAC desktop switches), it falls
+// back to kbinani/screenshot, which uses the same BitBlt but doesn't switch
+// desktops first — sometimes that works better right after a UAC prompt.
 func captureScreenWindows() (*image.RGBA, error) {
-	// First try the desktop-aware capture
-	var w, h C.int
-	// Allocate max buffer (4 bytes per pixel, max 4K resolution)
-	maxSize := 3840 * 2160 * 4
-	buf := make([]byte, maxSize)
-	ret := C.captureActiveDesktop((*C.char)(unsafe.Pointer(&buf[0])), &w, &h)
-	if ret == 0 {
-		// Fallback to kbinani/screenshot
-		return captureScreenKbinani()
-	}
+        // First try the desktop-aware capture
+        var w, h C.int
+        // Allocate max buffer (4 bytes per pixel, max 4K resolution)
+        maxSize := 3840 * 2160 * 4
+        buf := make([]byte, maxSize)
+        ret := C.captureActiveDesktop((*C.char)(unsafe.Pointer(&buf[0])), &w, &h)
+        if ret == 0 {
+                // Fallback to kbinani/screenshot
+                return captureScreenKbinani()
+        }
 
-	width := int(w)
-	height := int(h)
-	img := image.NewRGBA(image.Rect(0, 0, width, height))
-	// The buffer is BGRA, convert to RGBA
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			idx := (y*width + x) * 4
-			img.Pix[idx+0] = buf[idx+2]   // R from B
-			img.Pix[idx+1] = buf[idx+1]   // G
-			img.Pix[idx+2] = buf[idx+0]   // B from R
-			img.Pix[idx+3] = 255           // A
-		}
-	}
-	return img, nil
+        width := int(w)
+        height := int(h)
+        img := image.NewRGBA(image.Rect(0, 0, width, height))
+        // The buffer is BGRA, convert to RGBA
+        for y := 0; y < height; y++ {
+                for x := 0; x < width; x++ {
+                        idx := (y*width + x) * 4
+                        img.Pix[idx+0] = buf[idx+2]   // R from B
+                        img.Pix[idx+1] = buf[idx+1]   // G
+                        img.Pix[idx+2] = buf[idx+0]   // B from R
+                        img.Pix[idx+3] = 255           // A
+                }
+        }
+
+        // Detect all-black frames (can happen during elevation desktop switch).
+        // If the frame is all black, fall back to kbinani which captures the
+        // primary display directly without the OpenInputDesktop dance.
+        if isAllBlack(img) {
+                fbImg, fbErr := captureScreenKbinani()
+                if fbErr == nil && !isAllBlack(fbImg) {
+                        return fbImg, nil
+                }
+                // Both methods returned black — return the original (better than
+                // nothing; the technician will at least see "Live" status).
+        }
+
+        return img, nil
+}
+
+// isAllBlack returns true if every pixel in the image is (0,0,0,255) or close.
+// We sample a sparse grid for performance (checking every pixel on a 4K frame
+// at 30 FPS would be wasteful).
+func isAllBlack(img *image.RGBA) bool {
+        const step = 64 // check every 64th pixel in each dimension
+        b := img.Bounds()
+        sampled := 0
+        for y := b.Min.Y; y < b.Max.Y; y += step {
+                for x := b.Min.X; x < b.Max.X; x += step {
+                        // image.RGBA uses the Pix slice with stride = 4 * width
+                        // and the origin at Pix[0]. For a sub-image, use the offset.
+                        idx := img.PixOffset(x, y)
+                        r := img.Pix[idx]
+                        g := img.Pix[idx+1]
+                        bl := img.Pix[idx+2]
+                        if r > 5 || g > 5 || bl > 5 {
+                                return false
+                        }
+                        sampled++
+                }
+        }
+        // If we sampled at least a few pixels and they were all ~black, treat
+        // the whole frame as black.
+        return sampled > 0
 }
 
 // captureScreenKbinani is the fallback using the kbinani library
 func captureScreenKbinani() (*image.RGBA, error) {
-	return screenshot.CaptureDisplay(currentMonitor)
+        return screenshot.CaptureDisplay(currentMonitor)
 }

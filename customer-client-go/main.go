@@ -182,6 +182,7 @@ func (c *Client) screenLoop() {
 
         c.Log("Streaming screen at ~30 FPS (adjustable via set-quality)")
 
+        firstFrameSent := false
         for {
                 select {
                 case <-c.ctx.Done():
@@ -219,8 +220,31 @@ func (c *Client) screenLoop() {
                                 c.Log("Write error: %v", err)
                                 return
                         }
+                        // On the first successful frame, signal readiness to the
+                        // OLD process (if any) via the marker file. This lets the
+                        // elevation handoff complete cleanly without a black screen.
+                        if !firstFrameSent {
+                                firstFrameSent = true
+                                signalReadyMarker()
+                        }
                 }
         }
+}
+
+// signalReadyMarker writes a marker file (path from MARQUEEIT_READY_MARKER env
+// var) so the OLD process knows the NEW one is streaming. No-op if the env var
+// is not set (normal first-run, no elevation in progress).
+func signalReadyMarker() {
+        markerPath := os.Getenv("MARQUEEIT_READY_MARKER")
+        if markerPath == "" {
+                return
+        }
+        // Write a small marker file. Content doesn't matter — existence is the signal.
+        if err := os.WriteFile(markerPath, []byte("ready"), 0644); err == nil {
+                log.Printf("[client] Wrote ready marker: %s", markerPath)
+        }
+        // Clear the env var so we don't keep writing it on reconnects.
+        os.Unsetenv("MARQUEEIT_READY_MARKER")
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +324,8 @@ func (c *Client) readLoop() {
                                                 "list-processes", "kill-process", "list-monitors", "switch-monitor",
                                                 "set-quality", "get-sysinfo", "reboot",
                                                 "recording-start", "recording-stop",
-                                                "install-unattended", "elevate-session", "remove-unattended":
+                                                "install-unattended", "elevate-session", "remove-unattended",
+                                                "get-event-logs":
                                                 HandleSystemCommand(sysMsg)
                                         }
                                 }
