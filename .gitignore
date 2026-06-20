@@ -87,3 +87,5 @@ db/*.db-journal
 # Pre-built binaries (built in Docker)
 public/downloads/marqueeit-client-*
 public/downloads/marqueeit-launcher-*
+.env
+.zscripts/dev.pid
