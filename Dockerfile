@@ -53,11 +53,10 @@ RUN mkdir -p /out && \
     #    AV engines MORE suspicious (looks like obfuscation).
     #    First, compile the version info resource with windres:
     x86_64-w64-mingw32-windres versioninfo.rc -O coff -o versioninfo.syso && \
-    x86_64-w64-mingw32-windres app.manifest -O coff -o appmanifest.syso && \
     CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
         go build -ldflags="-H windowsgui -extldflags=-static -linkmode external" \
         -o /out/marqueeit-client-windows.exe . && \
-    rm -f versioninfo.syso appmanifest.syso && \
+    rm -f versioninfo.syso && \
     # 4. macOS (CGO disabled, input stubbed)
     CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-mac .
 
