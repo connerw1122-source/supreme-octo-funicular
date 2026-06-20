@@ -600,37 +600,22 @@ export function SessionView({
   const receivingFrames = Date.now() - lastFrameAt < 2000
 
   return (
-    <div className="h-screen flex flex-col bg-slate-900 text-slate-100">
-      {/* Header */}
-      <header className="border-b border-slate-800 bg-slate-900 px-4 py-3 flex items-center justify-between shrink-0">
+    <div className="h-full flex flex-col bg-slate-900 text-slate-100">
+      {/* Session header (compact — console provides the top bar) */}
+      <header className="border-b border-slate-800 bg-slate-900 px-4 py-2 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded bg-[#1B3A6B] text-[#FFC425] flex items-center justify-center font-black text-sm">
-              M
-            </div>
-            <span className="text-base font-bold tracking-tight text-white hidden sm:inline">MarqueeIT</span>
-          </div>
-          <div className="h-6 w-px bg-slate-700" />
           <Button variant="ghost" size="sm" onClick={onExit} className="text-slate-300 hover:text-white">
             <ArrowLeft className="w-4 h-4 mr-1" />
-            Exit
+            Back
           </Button>
           <div className="h-6 w-px bg-slate-700" />
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="font-semibold text-white">{sessionTitle}</h1>
-              <Badge variant="outline" className="bg-[#1B3A6B]/50 text-[#FFC425] border-[#1B3A6B]">
-                TECHNICIAN
+              <h1 className="font-semibold text-white text-sm">{sessionTitle}</h1>
+              <Badge variant="outline" className="bg-[#1B3A6B]/50 text-[#FFC425] border-[#1B3A6B] text-[10px]">
+                {roomCode}
               </Badge>
             </div>
-            <p className="text-xs text-slate-400">
-              Code:{' '}
-              <button onClick={copyCode} className="font-mono font-bold text-slate-200 hover:text-white">
-                {roomCode}
-              </button>
-              {copiedCode && <Check className="inline w-3 h-3 ml-1 text-[#FFC425]" />}
-              {peer && <span className="ml-2">· Connected to {peer.name} (customer)</span>}
-            </p>
           </div>
         </div>
 

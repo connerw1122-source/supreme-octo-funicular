@@ -6,8 +6,16 @@ import { LoginView } from '@/components/login-view'
 import { TechnicianDashboard } from '@/components/technician-dashboard'
 import { CustomerDownload } from '@/components/customer-download'
 import { SessionView } from '@/components/session-view'
+import { TechnicianConsole } from '@/components/technician-console'
 import { Toaster } from 'sonner'
 import { clearSession, getSession } from '@/lib/auth'
+
+interface SessionTab {
+  id: string
+  sessionId: string
+  code: string
+  title: string
+}
 
 type View =
   | { name: 'landing' }
@@ -15,23 +23,15 @@ type View =
   | { name: 'technician'; technicianName: string }
   | { name: 'customer-download'; code: string; customerName: string }
   | {
-      name: 'session'
-      roomCode: string
-      displayName: string
-      sessionTitle: string
-      sessionId: string
+      name: 'technician-console'
+      technicianName: string
+      activeSession: SessionTab | null
+      openSessions: SessionTab[]
     }
 
-// Compute the initial view once: if a session is already saved in localStorage
-// (from a previous login), boot straight into the technician dashboard.
 function getInitialView(): View {
   if (typeof window === 'undefined') return { name: 'landing' }
   const hash = window.location.hash
-  if (browserShareMatch) {
-    const code = browserShareMatch[1].toUpperCase()
-    const customerName = browserShareMatch[2] ? decodeURIComponent(browserShareMatch[2]) : ''
-  }
-  // Customer download: #join/CODE or #join/CODE/NAME
   const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
   if (joinMatch) {
     const code = joinMatch[1].toUpperCase()
@@ -48,19 +48,9 @@ function getInitialView(): View {
 export default function Home() {
   const [view, setView] = useState<View>(getInitialView)
 
-  // ---------------------------------------------------------------------------
-  // Hash-based routing for the customer download link: #join/CODE/NAME
-  // ---------------------------------------------------------------------------
   useEffect(() => {
     const applyHash = () => {
       const hash = window.location.hash
-      // Browser share
-      if (browserShareMatch) {
-        const code = browserShareMatch[1].toUpperCase()
-        const customerName = browserShareMatch[2] ? decodeURIComponent(browserShareMatch[2]) : ''
-        return
-      }
-      // Customer download
       const joinMatch = hash.match(/^#join\/([A-Za-z0-9]+)(?:\/([^/]+))?/)
       if (joinMatch) {
         const code = joinMatch[1].toUpperCase()
@@ -73,22 +63,23 @@ export default function Home() {
     return () => window.removeEventListener('hashchange', applyHash)
   }, [])
 
-  // Clear hash when we leave customer views
   useEffect(() => {
     if (view.name !== 'customer-download' && window.location.hash) {
       history.replaceState(null, '', window.location.pathname + window.location.search)
     }
   }, [view.name])
 
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
   const handleTechnicianLogin = useCallback(() => {
     setView({ name: 'login' })
   }, [])
 
   const handleLoginSuccess = useCallback((username: string) => {
-    setView({ name: 'technician', technicianName: username })
+    setView({
+      name: 'technician-console',
+      technicianName: username,
+      activeSession: null,
+      openSessions: [],
+    })
   }, [])
 
   const handleLoginBack = useCallback(() => {
@@ -97,7 +88,6 @@ export default function Home() {
 
   const handleCustomer = useCallback((code: string, name: string) => {
     setView({ name: 'customer-download', code, customerName: name })
-    // Update hash so the link is shareable
     const safeName = name ? '/' + encodeURIComponent(name) : ''
     history.replaceState(null, '', `#join/${code.toUpperCase()}${safeName}`)
   }, [])
@@ -111,34 +101,56 @@ export default function Home() {
     setView({ name: 'landing' })
   }, [])
 
-  const handleJoinSession = useCallback(
-    (sessionId: string, code: string, title: string) => {
-      setView((current) => {
-        if (current.name !== 'technician') return current
-        return {
-          name: 'session',
-          roomCode: code,
-          displayName: current.technicianName,
-          sessionTitle: title,
-          sessionId,
-        }
-      })
-    },
-    []
-  )
-
-  const handleExitSession = useCallback(() => {
+  // --- Multi-session management ---
+  const handleOpenSession = useCallback((sessionId: string, code: string, title: string) => {
     setView((current) => {
+      if (current.name !== 'technician-console') return current
+      // Check if this session is already open
+      const existing = current.openSessions.find((s) => s.sessionId === sessionId)
+      if (existing) {
+        return { ...current, activeSession: existing }
+      }
+      // Open a new tab
+      const newTab: SessionTab = { id: Math.random().toString(36).slice(2), sessionId, code, title }
+      return {
+        ...current,
+        activeSession: newTab,
+        openSessions: [...current.openSessions, newTab],
+      }
+    })
+  }, [])
+
+  const handleCloseSession = useCallback((tabId: string) => {
+    setView((current) => {
+      if (current.name !== 'technician-console') return current
+      const remaining = current.openSessions.filter((s) => s.id !== tabId)
+      const newActive = current.activeSession?.id === tabId
+        ? remaining[remaining.length - 1] ?? null
+        : current.activeSession
+      return { ...current, openSessions: remaining, activeSession: newActive }
+    })
+  }, [])
+
+  const handleSwitchSession = useCallback((tabId: string) => {
+    setView((current) => {
+      if (current.name !== 'technician-console') return current
+      const tab = current.openSessions.find((s) => s.id === tabId)
+      return tab ? { ...current, activeSession: tab } : current
+    })
+  }, [])
+
+  const handleExitToLanding = useCallback(() => {
+    setView((current) => {
+      if (current.name === 'technician-console') {
+        return { name: 'landing' }
+      }
       if (current.name === 'session') {
-        return { name: 'technician', technicianName: current.displayName }
+        return { name: 'landing' }
       }
       return { name: 'landing' }
     })
   }, [])
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
   return (
     <>
       <Toaster position="bottom-left" richColors closeButton toastOptions={{ style: { marginBottom: '60px' } }} />
@@ -153,23 +165,23 @@ export default function Home() {
           technicianName={view.technicianName}
           onBack={handleBackToLanding}
           onLogout={handleLogout}
-          onJoinSession={handleJoinSession}
+          onJoinSession={handleOpenSession}
         />
       )}
       {view.name === 'customer-download' && (
         <CustomerDownload code={view.code} name={view.customerName} onBack={handleBackToLanding} />
       )}
-      {view.name === 'session' && (
-        <SessionView
-          roomCode={view.roomCode}
-          displayName={view.displayName}
-          sessionTitle={view.sessionTitle}
-          sessionId={view.sessionId}
-          onExit={handleExitSession}
-          onEnded={handleExitSession}
+      {view.name === 'technician-console' && (
+        <TechnicianConsole
+          technicianName={view.technicianName}
+          openSessions={view.openSessions}
+          activeSession={view.activeSession}
+          onOpenSession={handleOpenSession}
+          onCloseSession={handleCloseSession}
+          onSwitchSession={handleSwitchSession}
+          onLogout={handleLogout}
         />
       )}
     </>
   )
 }
-

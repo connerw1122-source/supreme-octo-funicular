@@ -263,15 +263,8 @@ export function TechnicianDashboard({
       <header className="border-b bg-white">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <div className="w-9 h-9 rounded bg-[#1B3A6B] text-[#FFC425] flex items-center justify-center font-black text-lg">
-                M
-              </div>
-              <span className="text-lg font-bold tracking-tight text-[#1B3A6B]">MarqueeIT</span>
-            </div>
-            <div className="h-6 w-px bg-slate-200" />
             <div>
-              <h1 className="text-sm font-semibold text-slate-900">Technician Console</h1>
+              <h1 className="text-sm font-semibold text-slate-900">Dashboard</h1>
               <p className="text-xs text-slate-500">Signed in as {technicianName}</p>
             </div>
           </div>
@@ -292,9 +285,6 @@ export function TechnicianDashboard({
             >
               <MonitorSmartphone className="w-4 h-4 mr-1" />
               Setup Unattended
-            </Button>
-            <Button variant="ghost" size="sm" onClick={onLogout} title="Sign out">
-              <LogOut className="w-4 h-4" />
             </Button>
           </div>
         </div>
