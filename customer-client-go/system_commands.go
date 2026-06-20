@@ -682,13 +682,11 @@ func getEventLogs(logName string, maxEvents int) string {
                         return out
                 }
                 // Fallback to wevtutil (native command, no PowerShell dependency)
-                cmd := exec.Command("cmd", "/c",
+                wevtOut, _ := winExecHidden(
                         fmt.Sprintf("wevtutil qe %s /c:%d /f:text /rd:true /q:*[System[(Level=1 or Level=2 or Level=3 or Level=4 or Level=0)]]",
                                 logName, maxEvents))
-                cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-                wevtOut, _ := cmd.Output()
                 if len(wevtOut) > 0 {
-                        return string(wevtOut)
+                        return wevtOut
                 }
                 return "[error] Could not retrieve event logs. PowerShell error: " + err.Error()
         case "linux":
