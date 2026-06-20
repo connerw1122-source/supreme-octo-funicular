@@ -49,11 +49,11 @@ import (
 // Version is set at build time via -ldflags
 var Version = "dev"
 
-// ---------------------------------------------------------------------------
-// Configuration
-// ---------------------------------------------------------------------------
-
-const DefaultServer = "http://localhost:81"
+// DefaultServer is the server URL baked in at build time.
+// Override with: -ldflags "-X main.DefaultServer=https://your-domain.com"
+// This is CRITICAL: without it, the customer's binary doesn't know where
+// to connect and fails silently.
+var DefaultServer = "https://support.wizardyoda.com"
 
 // ---------------------------------------------------------------------------
 // Client
@@ -501,18 +501,19 @@ func main() {
         }
 
         if code == "" {
-                fmt.Print("Enter your 6-character session code: ")
-                fmt.Scanln(&code)
+                // Can't prompt for code — there's no console with -H windowsgui.
+                // Show a message box explaining the problem.
+                showMessageBox("MarqueeIT",
+                        "This program needs to be downloaded from your technician's support page.\n\n"+
+                                "Please ask your technician for the download link and try again.\n\n"+
+                                "If you already downloaded it from the link, make sure the filename hasn't been renamed — it should look like \"marqueeit-ABC123.exe\" with your session code in it.")
+                os.Exit(1)
         }
         if name == "" {
-                // Default to hostname. Customers don't need to type their name —
-                // the launcher passes it via --name if they entered it on the
-                // landing page. If they skipped the name field, we just use
-                // the machine's hostname so the technician has something to call them.
                 name = hostname()
         }
         if len(code) < 4 {
-                fmt.Fprintln(os.Stderr, "Invalid code")
+                showMessageBox("MarqueeIT", "Invalid session code in filename.\nPlease re-download from your technician's support page.")
                 os.Exit(1)
         }
 
@@ -522,7 +523,9 @@ func main() {
         go handleSignals(cancel)
 
         if err := c.Run(ctx); err != nil {
-                log.Fatalf("Client error: %v", err)
+                showMessageBox("MarqueeIT", "Could not connect to your technician.\n\nError: "+err.Error()+
+                        "\n\nPlease check your internet connection and try again, or call your technician.")
+                os.Exit(1)
         }
 }
 

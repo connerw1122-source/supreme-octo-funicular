@@ -18,6 +18,9 @@ FROM golang:1.23-bookworm AS go-builder
 
 WORKDIR /src
 
+# Build arg for the server URL baked into the Windows binary
+ARG MARQUEEIT_SERVER_URL=https://support.wizardyoda.com
+
 # Install system dependencies for CGo cross-compilation:
 #   libx11-dev     — X11 client library headers (Linux X11 build)
 #   libxtst-dev    — XTest extension headers (input injection)
@@ -44,21 +47,24 @@ COPY customer-client-go/ ./
 # Build all binaries
 RUN mkdir -p /out && \
     # 1. Linux X11 (CGO enabled for X11 input injection)
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/marqueeit-client-linux . && \
+    CGO_ENABLED=1 go build -ldflags="-s -w -X main.DefaultServer=$MARQUEEIT_SERVER_URL" -o /out/marqueeit-client-linux . && \
     # 2. Linux Wayland (view-only, no input injection)
-    CGO_ENABLED=1 go build -tags wayland -ldflags="-s -w" -o /out/marqueeit-client-linux-wayland . && \
+    CGO_ENABLED=1 go build -tags wayland -ldflags="-s -w -X main.DefaultServer=$MARQUEEIT_SERVER_URL" -o /out/marqueeit-client-linux-wayland . && \
     # 3. Windows (CGO + MinGW for SendInput, no console window)
     #    Includes version info + manifest to reduce AV false positives.
     #    Note: we DON'T use -s -w here because stripping debug info makes
     #    AV engines MORE suspicious (looks like obfuscation).
-    #    First, compile the version info resource with windres:
+    #    The DefaultServer URL is baked in via -ldflags so the customer's
+    #    binary knows where to connect without any config file.
+    #    Override with: --build-arg MARQUEEIT_SERVER_URL=https://your-domain.com
+    MARQUEEIT_SERVER_URL="${MARQUEEIT_SERVER_URL:-https://support.wizardyoda.com}" && \
     x86_64-w64-mingw32-windres versioninfo.rc -O coff -o versioninfo.syso && \
     CC=x86_64-w64-mingw32-gcc CGO_ENABLED=1 GOOS=windows GOARCH=amd64 \
-        go build -ldflags="-H windowsgui -extldflags=-static -linkmode external" \
+        go build -ldflags="-H windowsgui -extldflags=-static -linkmode external -X main.DefaultServer=$MARQUEEIT_SERVER_URL" \
         -o /out/marqueeit-client-windows.exe . && \
     rm -f versioninfo.syso && \
     # 4. macOS (CGO disabled, input stubbed)
-    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o /out/marqueeit-client-mac .
+    CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -X main.DefaultServer=$MARQUEEIT_SERVER_URL" -o /out/marqueeit-client-mac .
 
 # ---------------------------------------------------------------------------
 # Stage 2: Build the Next.js standalone app
