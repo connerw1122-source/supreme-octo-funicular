@@ -83,13 +83,16 @@ func installServiceElevated(machineCode, serverURL string) error {
         if runtime.GOOS == "windows" {
                 serviceName := "MarqueeIT"
 
-                // Write a VBS script that runs the batch file silently (no cmd window)
+                // Write a VBS script that runs the batch file silently (no cmd window).
+                // The binPath MUST be wrapped in double quotes for the exe path (spaces
+                // in "C:\Program Files\..." would break sc.exe). The inner quotes are
+                // escaped with ^" for cmd.exe's parser.
                 tmpVbs := filepath.Join(os.TempDir(), "marqueeit-install-svc.vbs")
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-install-svc.bat")
                 bat := fmt.Sprintf(`@echo off
 sc stop "%s" >nul 2>&1
 sc delete "%s" >nul 2>&1
-sc create "%s" binPath= "%s --unattended %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
+sc create "%s" binPath= "\"%s\" --unattended %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
 sc description "%s" "MarqueeIT Remote Support - allows technicians to connect remotely"
 sc failure "%s" reset= 60 actions= restart/5000/restart/10000/restart/30000
 sc start "%s"
@@ -118,6 +121,9 @@ WshShell.Run "%s", 0, True
                         }
                         time.Sleep(500 * time.Millisecond)
                 }
+                // Best-effort: the install bat just ran elevated. The SCM wrapper
+                // (service_windows.go) handles the 30s timeout by reporting RUNNING
+                // immediately, so no per-service timeout tweak is needed.
                 os.Remove(tmpBat)
                 os.Remove(tmpVbs)
                 os.Remove(donePath)
@@ -177,19 +183,28 @@ del "%s"
 // --- Windows ---
 
 func installWindowsService(exe, machineCode, serverURL string) error {
-        // Use sc.exe to create a Windows service
+        // Use sc.exe to create a Windows service.
+        // The binPath must be quoted if it contains spaces (e.g., "C:\Program Files\...").
+        // sc.exe's binPath= argument is special — it takes everything after "binPath= "
+        // as the path, so the entire command line (exe + args) must be a single
+        // double-quoted string if the path has spaces.
         serviceName := "MarqueeIT"
+        binPath := fmt.Sprintf(`"%s" --unattended %s --server %s`, exe, machineCode, serverURL)
         cmd := exec.Command("sc", "create", serviceName,
-                "binPath=", fmt.Sprintf(`"%s" --unattended %s --server %s`, exe, machineCode, serverURL),
+                "binPath=", binPath,
                 "start=", "auto",
                 "displayname=", "MarqueeIT Remote Support",
         )
         if output, err := cmd.CombinedOutput(); err != nil {
                 return fmt.Errorf("sc create failed: %s: %w", string(output), err)
         }
+        // Set the service to restart on failure (5s, 10s, 30s) and reset the
+        // failure counter after 60s.
+        exec.Command("sc", "failure", serviceName, "reset=", "60",
+                "actions=", "restart/5000/restart/10000/restart/30000").Run()
         // Start it now
         exec.Command("sc", "start", serviceName).Run()
-        log.Printf("Installed and started Windows service: %s", serviceName)
+        log.Printf("Installed and started Windows service: %s (binPath=%s)", serviceName, binPath)
         return nil
 }
 

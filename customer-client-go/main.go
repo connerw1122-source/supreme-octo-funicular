@@ -594,6 +594,18 @@ func main() {
                         fmt.Fprintln(os.Stderr, "Invalid machine code")
                         os.Exit(1)
                 }
+                // If we were launched by the Windows Service Control Manager
+                // (i.e., we're running as a service), use the SCM wrapper so
+                // we report SERVICE_RUNNING within the 30-second SCM timeout.
+                // Otherwise the SCM kills us with Error 7000/7009.
+                if isWindowsService() {
+                        log.Printf("[client] Running under Windows SCM — starting service wrapper")
+                        if err := runAsWindowsService(server, unattended); err != nil {
+                                log.Fatalf("Service failed: %v", err)
+                        }
+                        return
+                }
+                // Interactive run (double-clicked, command line, scheduled task)
                 c := NewClient(server, "", hostname())
                 ctx, cancel := context.WithCancel(context.Background())
                 defer cancel()
