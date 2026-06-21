@@ -209,7 +209,30 @@ export function SessionView({
           switch (msg.type) {
             case 'joined-room':
               setPeers(msg.peers || [])
-              setCustomerConnected((msg.peers || []).some((p: Peer) => p.role === 'customer'))
+              {
+                const hasCustomer = (msg.peers || []).some((p: Peer) => p.role === 'customer')
+                setCustomerConnected(hasCustomer)
+                // If the customer is already in the room (technician rejoined),
+                // trigger the auto-grab sequence — peer-joined won't fire because
+                // the customer didn't just join, we did.
+                if (hasCustomer) {
+                  setInputLocked(false)
+                  setScreenLocked(false)
+                  setControlMode(false)
+                  setCurrentMonitorIdx(0)
+                  setQualityLevel(55)
+                  setFpsLevel(30)
+                  setUacSecureDesktopEnabled(null)
+                  setExpandedSysInfo(null)
+                  setCmdOutput([])
+                  setProcessList([])
+                  setEventLogs([])
+                  pressedKeysRef.current.clear()
+                  setTimeout(() => sendSystemCommand({ type: 'get-sysinfo' }), 1000)
+                  setTimeout(() => sendSystemCommand({ type: 'list-monitors' }), 1500)
+                  setTimeout(() => sendSystemCommand({ type: 'get-uac-secure-desktop' }), 2000)
+                }
+              }
               break
             case 'peer-joined':
               setPeers((prev) => prev.some((p) => p.id === msg.id) ? prev : [...prev, msg])
@@ -339,7 +362,7 @@ export function SessionView({
               if (msg.result === 'success') {
                 setUacSecureDesktopEnabled(msg.enabled === true)
                 if (msg.enabled === false) {
-                  toast.success('UAC Secure Desktop DISABLED. You can now interact with UAC prompts.')
+                  toast.success('UAC Secure Desktop DISABLED. You can now SEE UAC prompts. To INTERACT with them, the session must be elevated (click the amber Shield button first).')
                 } else {
                   toast.success('UAC Secure Desktop ENABLED. Default security restored.')
                 }
@@ -623,11 +646,11 @@ export function SessionView({
       if (!confirm(
         'Disable UAC Secure Desktop?\n\n' +
         'When disabled, UAC prompts will appear on the normal desktop instead of ' +
-        'the isolated secure desktop. This allows you to see and interact with ' +
-        'UAC prompts during remote control.\n\n' +
+        'the isolated secure desktop. This allows you to SEE UAC prompts.\n\n' +
+        'IMPORTANT: To also INTERACT with UAC prompts (click Yes/No), the session ' +
+        'must be running as admin. Click the amber Shield button to elevate first.\n\n' +
         'The customer will see a UAC prompt and needs to click YES.\n\n' +
-        'Note: This slightly reduces security (any process could click UAC prompts). ' +
-        'Re-enable after the session to restore the default behavior.'
+        'Note: This slightly reduces security. Re-enable after the session.'
       )) return
       toast.info('Disabling UAC Secure Desktop — customer will see a UAC prompt...')
     }
@@ -765,9 +788,8 @@ export function SessionView({
   // the inline style on every render, which contributed to the flashing.
   const canvasStyle = {
     imageRendering: 'auto' as const,
-    width: '100%',
-    height: '100%',
-    objectFit: 'contain' as const,
+    maxWidth: '100%',
+    maxHeight: '100%',
     border: '2px solid #FFC425',
     borderRadius: '4px',
     boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
