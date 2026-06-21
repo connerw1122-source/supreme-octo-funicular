@@ -213,19 +213,48 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 if runtime.GOOS == "windows" {
                         serviceName := "MarqueeIT"
                         tmpBat := filepath.Join(os.TempDir(), "marqueeit-remove-svc.bat")
+                        tmpVbs := filepath.Join(os.TempDir(), "marqueeit-remove-svc.vbs")
+                        donePath := filepath.Join(os.TempDir(), "marqueeit-remove-done.txt")
+                        os.Remove(donePath)
+                        // The bat stops and deletes the service. We add a 2-second
+                        // delay at the start so this process can send the result
+                        // before the service (which might be us) gets stopped.
                         bat := fmt.Sprintf(`@echo off
+timeout /t 2 /nobreak >nul
 sc stop "%s" >nul 2>&1
+timeout /t 1 /nobreak >nul
 sc delete "%s" >nul 2>&1
-echo DONE
-`, serviceName, serviceName)
+echo DONE > "%s"
+`, serviceName, serviceName, donePath)
                         os.WriteFile(tmpBat, []byte(bat), 0644)
-                        psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs -Wait`, tmpBat)
+                        // VBS wrapper runs the bat silently (no cmd window flash)
+                        vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "%s", 0, True
+`, tmpBat)
+                        os.WriteFile(tmpVbs, []byte(vbs), 0644)
+                        // Run elevated via UAC (non-blocking — we poll for the done marker)
+                        psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpVbs)
                         cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                         cmd.SysProcAttr = &syscall.SysProcAttr{}
                         hideWindow(cmd.SysProcAttr)
-                        cmd.Run()
+                        cmd.Start()
+                        // Wait for the done marker (up to 15 seconds)
+                        removed := false
+                        for i := 0; i < 30; i++ {
+                                if _, err := os.Stat(donePath); err == nil {
+                                        removed = true
+                                        break
+                                }
+                                time.Sleep(500 * time.Millisecond)
+                        }
                         os.Remove(tmpBat)
-                        sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                        os.Remove(tmpVbs)
+                        os.Remove(donePath)
+                        if removed {
+                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                        } else {
+                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "error: service removal timed out — the customer may need to click Yes on the UAC prompt"})
+                        }
                 } else {
                         uninstallService()
                         sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})

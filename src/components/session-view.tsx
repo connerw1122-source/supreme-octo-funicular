@@ -279,10 +279,12 @@ export function SessionView({
             setExpandedSysInfo(msg.details || {})
             break
           case 'unattended-result':
-            if (msg.result && !msg.result.startsWith('error')) {
+            if (msg.result === 'removed') {
+              toast.success('Unattended access removed from this machine.')
+            } else if (msg.result && !msg.result.startsWith('error')) {
               toast.success('Unattended access installed! You can now reconnect anytime from the dashboard.')
             } else {
-              toast.error('Failed to install unattended access: ' + (msg.result || 'unknown error'))
+              toast.error('Failed: ' + (msg.result || 'unknown error'))
             }
             break
           case 'elevate-result':
@@ -518,6 +520,12 @@ export function SessionView({
     if (!confirm('Install unattended access on this machine? This will set up the MarqueeIT client to start on boot, so you can reconnect without the customer being present.')) return
     toast.info('Installing unattended access...')
     sendSystemCommand({ type: 'install-unattended' })
+  }, [sendSystemCommand])
+
+  const removeUnattended = useCallback(() => {
+    if (!confirm('Remove unattended access from this machine? This will stop and delete the MarqueeIT service. The customer will see a UAC prompt and needs to click YES.')) return
+    toast.info('Removing unattended access — customer will see a UAC prompt...')
+    sendSystemCommand({ type: 'remove-unattended' })
   }, [sendSystemCommand])
 
   const elevateSession = useCallback(() => {
@@ -928,6 +936,9 @@ export function SessionView({
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
                 <MonitorSmartphone className="w-3.5 h-3.5" />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-orange-400 hover:text-orange-300" onClick={removeUnattended} title="Remove unattended access (uninstall service)">
+                <Trash2 className="w-3.5 h-3.5" />
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-red-400 hover:text-red-300" onClick={rebootCustomer} title="Reboot customer machine">
                 <Power className="w-3.5 h-3.5" />

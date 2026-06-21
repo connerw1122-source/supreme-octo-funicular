@@ -234,11 +234,11 @@ export function TechnicianDashboard({
   }
 
   const deleteMachine = async (machineCode: string, name: string) => {
-    if (!confirm(`Remove "${name}" from unattended machines?`)) return
+    if (!confirm(`Remove "${name}" from the dashboard?\n\nThis only removes the server-side registration. To fully uninstall the MarqueeIT service from this machine, connect to it and use the Remove Unattended button in the session toolbar.`)) return
     try {
       const res = await fetch(`/api/unattended/${machineCode}/delete`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete')
-      toast.success('Machine removed')
+      toast.success('Machine removed from dashboard')
       fetchMachines()
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to remove machine')
@@ -252,11 +252,14 @@ export function TechnicianDashboard({
   }
 
   const machineStatusBadge = (status: string, lastSeen: string | null) => {
-    if (status === 'online') {
+    // A machine is only "online" if it has heartbeated within the last 2 minutes,
+    // regardless of what the status field says. The DB status field is only
+    // updated on heartbeat, so it stays "online" forever after the machine
+    // goes offline.
+    const stale = !lastSeen || Date.now() - new Date(lastSeen).getTime() > 2 * 60 * 1000
+    if (status === 'online' && !stale) {
       return <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">Online</Badge>
     }
-    // Consider offline if last seen > 2 minutes ago
-    const stale = !lastSeen || Date.now() - new Date(lastSeen).getTime() > 2 * 60 * 1000
     return (
       <Badge variant="outline" className="bg-slate-50 text-slate-500 border-slate-200">
         {stale ? 'Offline' : 'Idle'}

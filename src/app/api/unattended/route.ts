@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-function generateCode(len = 8): string {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+// Generate a 6-digit numeric machine code (matching session code format)
+// so the technician doesn't have to deal with two different code styles.
+function generateCode(len = 6): string {
   let out = ''
   for (let i = 0; i < len; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)]
+    out += Math.floor(Math.random() * 10).toString()
   }
   return out
 }
 
 async function generateUniqueCode(): Promise<string> {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 20; i++) {
     const code = generateCode()
     const existing = await db.unattendedMachine.findUnique({ where: { machineCode: code } })
     if (!existing) return code

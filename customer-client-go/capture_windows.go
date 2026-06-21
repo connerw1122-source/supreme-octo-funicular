@@ -9,18 +9,37 @@ package main
 // captureActiveDesktop captures whatever desktop is currently active
 // (including the lock screen / Winlogon desktop).
 // Returns 1 on success, 0 on failure. Writes pixels to the provided buffer.
-static int captureActiveDesktop(char* outBuf, int* width, int* height) {
-    // Open the active input desktop (handles lock screen)
-    HDESK hDesk = OpenInputDesktop(0, FALSE, GENERIC_READ);
+// Also writes the desktop name to deskNameBuf so the caller can tell whether
+// we captured the Default desktop or the Winlogon (lock screen) desktop.
+static int captureActiveDesktop(char* outBuf, int* width, int* height, char* deskNameBuf, int deskNameLen) {
+    // Open the active input desktop with broader access rights.
+    // GENERIC_READ alone isn't always enough on the Winlogon desktop —
+    // we also need DESKTOP_READOBJECTS to read pixels via BitBlt.
+    HDESK hDesk = OpenInputDesktop(0, FALSE,
+        GENERIC_READ | DESKTOP_READOBJECTS);
     if (!hDesk) return 0;
+
+    // Get the desktop name for diagnostics
+    if (deskNameBuf && deskNameLen > 0) {
+        DWORD len = 0;
+        GetUserObjectInformationA(hDesk, UOI_NAME, deskNameBuf, deskNameLen, &len);
+        deskNameBuf[deskNameLen - 1] = 0;
+    }
 
     // Set this thread to the active desktop
     HDESK hOldDesk = GetThreadDesktop(GetCurrentThreadId());
-    SetThreadDesktop(hDesk);
+    if (!SetThreadDesktop(hDesk)) {
+        CloseDesktop(hDesk);
+        return 0;
+    }
 
     // Get the screen DC
     HDC hdcScreen = GetDC(NULL);
-    if (!hdcScreen) { CloseDesktop(hDesk); return 0; }
+    if (!hdcScreen) {
+        SetThreadDesktop(hOldDesk);
+        CloseDesktop(hDesk);
+        return 0;
+    }
 
     int w = GetSystemMetrics(SM_CXSCREEN);
     int h = GetSystemMetrics(SM_CYSCREEN);
@@ -29,7 +48,8 @@ static int captureActiveDesktop(char* outBuf, int* width, int* height) {
     HBITMAP hBitmap = CreateCompatibleBitmap(hdcScreen, w, h);
     HBITMAP hOld = SelectObject(hdcMem, hBitmap);
 
-    BitBlt(hdcMem, 0, 0, w, h, hdcScreen, 0, 0, SRCCOPY);
+    // BitBlt with SRCCOPY | CAPTUREBLT to include layered windows
+    BitBlt(hdcMem, 0, 0, w, h, hdcScreen, 0, 0, SRCCOPY | 0x40000000);
 
     // Get the bitmap data
     BITMAPINFOHEADER bih;
@@ -57,43 +77,57 @@ static int captureActiveDesktop(char* outBuf, int* width, int* height) {
 
     return 1;
 }
-
-// getActiveDesktopName returns the name of the currently active input desktop.
-// Useful for debugging — returns "Winlogon" when locked, "Default" when unlocked.
-static const char* getActiveDesktopName() {
-    static char name[256];
-    HDESK hDesk = OpenInputDesktop(0, FALSE, GENERIC_READ);
-    if (!hDesk) return "error";
-    DWORD len = 0;
-    GetUserObjectInformationA(hDesk, UOI_NAME, name, sizeof(name), &len);
-    CloseDesktop(hDesk);
-    return name;
-}
 */
 import "C"
 
 import (
         "image"
+        "log"
+        "strings"
+        "sync"
         "unsafe"
 
         "github.com/kbinani/screenshot"
 )
 
+// lastGoodFrame caches the most recent non-black frame. When the screen goes
+// black (e.g., Winlogon desktop we can't access), we re-send the last good
+// frame so the technician doesn't see a black screen.
+var (
+        lastGoodFrame     *image.RGBA
+        lastGoodFrameMu   sync.Mutex
+        lastDesktopName   = "Default"
+        lockedNotified    = false // avoid spamming the log
+)
+
 // captureScreenWindows captures the active desktop (including lock screen)
 // using OpenInputDesktop + BitBlt. If the capture returns all-black pixels
-// (which can happen briefly during elevation/UAC desktop switches), it falls
-// back to kbinani/screenshot, which uses the same BitBlt but doesn't switch
-// desktops first — sometimes that works better right after a UAC prompt.
+// (which happens on the Winlogon desktop when not running as SYSTEM), it
+// falls back to the last good frame so the technician sees a frozen frame
+// instead of black.
 func captureScreenWindows() (*image.RGBA, error) {
-        // First try the desktop-aware capture
         var w, h C.int
+        var deskNameBuf [256]byte
         // Allocate max buffer (4 bytes per pixel, max 4K resolution)
         maxSize := 3840 * 2160 * 4
         buf := make([]byte, maxSize)
-        ret := C.captureActiveDesktop((*C.char)(unsafe.Pointer(&buf[0])), &w, &h)
+        ret := C.captureActiveDesktop(
+                (*C.char)(unsafe.Pointer(&buf[0])),
+                &w, &h,
+                (*C.char)(unsafe.Pointer(&deskNameBuf[0])),
+                C.int(len(deskNameBuf)),
+        )
+
+        deskName := strings.TrimRight(string(deskNameBuf[:]), "\x00")
+        if deskName != "" {
+                lastDesktopName = deskName
+        }
+
         if ret == 0 {
-                // Fallback to kbinani/screenshot
-                return captureScreenKbinani()
+                // OpenInputDesktop or SetThreadDesktop failed — this happens on the
+                // Winlogon desktop when the process doesn't have SYSTEM privileges.
+                // Fall back to kbinani, then to the last good frame.
+                return getFallbackFrame("capture failed (likely Winlogon desktop)")
         }
 
         width := int(w)
@@ -110,19 +144,59 @@ func captureScreenWindows() (*image.RGBA, error) {
                 }
         }
 
-        // Detect all-black frames (can happen during elevation desktop switch).
-        // If the frame is all black, fall back to kbinani which captures the
-        // primary display directly without the OpenInputDesktop dance.
+        // Detect all-black frames (happens on Winlogon desktop without SYSTEM).
         if isAllBlack(img) {
+                // Try kbinani first — sometimes it captures the Default desktop
+                // which has the lock screen background.
                 fbImg, fbErr := captureScreenKbinani()
                 if fbErr == nil && !isAllBlack(fbImg) {
+                        cacheGoodFrame(fbImg)
                         return fbImg, nil
                 }
-                // Both methods returned black — return the original (better than
-                // nothing; the technician will at least see "Live" status).
+                // kbinani also returned black — we're on a desktop we can't access.
+                // Return the last good frame so the technician sees a frozen frame.
+                return getFallbackFrame("all-black frame on " + deskName + " desktop")
         }
 
+        // Good frame — cache it and reset the notification flag.
+        cacheGoodFrame(img)
+        if lockedNotified {
+                log.Printf("[capture] Screen unlocked (back on %s desktop)", deskName)
+                lockedNotified = false
+        }
         return img, nil
+}
+
+// cacheGoodFrame stores a copy of the most recent good frame.
+func cacheGoodFrame(img *image.RGBA) {
+        lastGoodFrameMu.Lock()
+        defer lastGoodFrameMu.Unlock()
+        // Shallow copy of the Pix slice is enough — we never mutate it after caching.
+        dup := *img
+        dup.Pix = make([]byte, len(img.Pix))
+        copy(dup.Pix, img.Pix)
+        lastGoodFrame = &dup
+}
+
+// getFallbackFrame returns the last good frame, or a kbinani capture, or nil.
+// Logs a one-time warning when the screen is locked.
+func getFallbackFrame(reason string) (*image.RGBA, error) {
+        if !lockedNotified {
+                log.Printf("[capture] Using fallback frame: %s (desktop=%s)", reason, lastDesktopName)
+                lockedNotified = true
+        }
+        lastGoodFrameMu.Lock()
+        if lastGoodFrame != nil {
+                // Return a copy so the caller can't mutate our cache.
+                dup := *lastGoodFrame
+                dup.Pix = make([]byte, len(lastGoodFrame.Pix))
+                copy(dup.Pix, lastGoodFrame.Pix)
+                lastGoodFrameMu.Unlock()
+                return dup, nil
+        }
+        lastGoodFrameMu.Unlock()
+        // No cached frame — try kbinani as a last resort.
+        return captureScreenKbinani()
 }
 
 // isAllBlack returns true if every pixel in the image is (0,0,0,255) or close.
@@ -134,8 +208,6 @@ func isAllBlack(img *image.RGBA) bool {
         sampled := 0
         for y := b.Min.Y; y < b.Max.Y; y += step {
                 for x := b.Min.X; x < b.Max.X; x += step {
-                        // image.RGBA uses the Pix slice with stride = 4 * width
-                        // and the origin at Pix[0]. For a sub-image, use the offset.
                         idx := img.PixOffset(x, y)
                         r := img.Pix[idx]
                         g := img.Pix[idx+1]
@@ -146,8 +218,6 @@ func isAllBlack(img *image.RGBA) bool {
                         sampled++
                 }
         }
-        // If we sampled at least a few pixels and they were all ~black, treat
-        // the whole frame as black.
         return sampled > 0
 }
 

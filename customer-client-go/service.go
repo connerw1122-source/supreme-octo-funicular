@@ -7,6 +7,7 @@ package main
 
 import (
         "bytes"
+        "crypto/rand"
         "encoding/json"
         "fmt"
         "log"
@@ -62,12 +63,20 @@ func installService(machineCode, serverURL string) error {
         }
 }
 
+// generateMachineCode produces a 6-digit numeric code (matching the session
+// code format) for use when the server doesn't provide one. Uses crypto/rand
+// for unpredictable digits.
 func generateMachineCode() string {
-        const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-        b := make([]byte, 8)
+        b := make([]byte, 6)
         for i := range b {
-                b[i] = alphabet[time.Now().UnixNano()%int64(len(alphabet))]
-                time.Sleep(time.Nanosecond)
+                // crypto/rand.Reader is always available; fall back to time-based
+                // if it somehow fails (extremely unlikely).
+                var n [1]byte
+                if _, err := rand.Read(n[:]); err != nil {
+                        b[i] = byte('0' + (time.Now().UnixNano() % 10))
+                        continue
+                }
+                b[i] = byte('0' + int(n[0])%10)
         }
         return string(b)
 }

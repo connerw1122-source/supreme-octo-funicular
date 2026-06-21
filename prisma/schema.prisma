@@ -60,7 +60,7 @@ model SessionEvent {
 // needing to be present or enter a code.
 model UnattendedMachine {
   id            String   @id @default(cuid())
-  machineCode   String   @unique // 8-char code the installer registers with
+  machineCode   String   @unique // 6-digit numeric code the installer registers with
   customerName  String   // Friendly label, e.g. "Front desk PC"
   hostname      String?
   os            String?
