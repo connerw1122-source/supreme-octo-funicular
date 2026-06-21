@@ -91,22 +91,49 @@ func installServiceElevated(machineCode, serverURL string) error {
 
         if runtime.GOOS == "windows" {
                 serviceName := "MarqueeIT"
+                exe, _ := os.Executable()
 
-                // Write a VBS script that runs the batch file silently (no cmd window).
-                // The binPath MUST be wrapped in double quotes for the exe path (spaces
-                // in "C:\Program Files\..." would break sc.exe). The inner quotes are
-                // escaped with ^" for cmd.exe's parser.
+                // IMPORTANT: We install BOTH a Windows service AND a scheduled task.
+                //
+                // The Windows service runs as SYSTEM in Session 0, which is isolated
+                // from the user's desktop. It CANNOT capture the screen or inject
+                // input into the user's session. Its only purpose is to survive reboots
+                // and launch the scheduled task.
+                //
+                // The scheduled task runs at logon in the user's interactive session
+                // (Session 1+). This is the process that actually does screen capture
+                // and input injection — it CAN see the desktop and interact with windows.
+                //
+                // This is the same architecture used by TeamViewer, AnyDesk, etc.
+
                 tmpVbs := filepath.Join(os.TempDir(), "marqueeit-install-svc.vbs")
                 tmpBat := filepath.Join(os.TempDir(), "marqueeit-install-svc.bat")
+                donePath := filepath.Join(os.TempDir(), "marqueeit-svc-done.txt")
+
+                // Escape paths for cmd.exe (backslashes are literal in bat files,
+                // but we need to quote paths with spaces)
                 bat := fmt.Sprintf(`@echo off
+REM Stop and delete old service if it exists
 sc stop "%s" >nul 2>&1
 sc delete "%s" >nul 2>&1
-sc create "%s" binPath= "\"%s\" --unattended %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
-sc description "%s" "MarqueeIT Remote Support - allows technicians to connect remotely"
+REM Create the service (runs as SYSTEM, just for reboot survival)
+sc create "%s" binPath= "\"%s\" --unattended-svc %s --server %s" start= auto displayname= "MarqueeIT Remote Support"
+sc description "%s" "MarqueeIT Remote Support - launches the user-session helper on logon"
 sc failure "%s" reset= 60 actions= restart/5000/restart/10000/restart/30000
-sc start "%s"
+REM Start the service
+sc start "%s" >nul 2>&1
+REM Create a scheduled task that runs at every user logon.
+REM This runs in the user's interactive session and can see the desktop.
+schtasks /create /tn "MarqueeIT" /tr "\"%s\" --unattended %s --server %s" /sc onlogon /rl highest /f
+REM Also run it now for the current session
+schtasks /run /tn "MarqueeIT"
 echo DONE > "%s"
-`, serviceName, serviceName, serviceName, exe, machineCode, serverURL, serviceName, serviceName, serviceName, filepath.Join(os.TempDir(), "marqueeit-svc-done.txt"))
+`,
+                        serviceName, serviceName,
+                        serviceName, exe, machineCode, serverURL,
+                        serviceName, serviceName, serviceName,
+                        exe, machineCode, serverURL,
+                        donePath)
                 os.WriteFile(tmpBat, []byte(bat), 0644)
                 // VBS wrapper runs the bat silently
                 vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
@@ -115,9 +142,6 @@ WshShell.Run "%s", 0, True
                 os.WriteFile(tmpVbs, []byte(vbs), 0644)
 
                 // Elevate wscript.exe explicitly (NOT the .vbs file).
-                // `Start-Process file.vbs -Verb RunAs` doesn't reliably trigger UAC
-                // on all Windows versions — we must elevate the executable and pass
-                // the .vbs path as an argument.
                 psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, tmpVbs)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
@@ -125,12 +149,9 @@ WshShell.Run "%s", 0, True
                 if err := cmd.Start(); err != nil {
                         return fmt.Errorf("could not start PowerShell for UAC elevation: %w", err)
                 }
-                // Wait for PowerShell to finish (it returns immediately after
-                // triggering UAC — the elevated process runs in background)
                 cmd.Wait()
 
                 // Wait for the done marker (up to 30 seconds)
-                donePath := filepath.Join(os.TempDir(), "marqueeit-svc-done.txt")
                 os.Remove(donePath)
                 done := false
                 for i := 0; i < 60; i++ {

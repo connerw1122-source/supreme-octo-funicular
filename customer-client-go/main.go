@@ -305,6 +305,19 @@ func (c *Client) readLoop() {
                         c.Log("[chat] %s: %s", envelope.Sender, envelope.Content)
                         // Show in the on-screen overlay window (no browser)
                         showChatOverlay(envelope.Sender, envelope.Content)
+                case "annotation":
+                        // Highlight annotation from the technician — show a ring
+                        // overlay on the customer's screen at the given coords.
+                        var annot struct {
+                                X     float64 `json:"x"`
+                                Y     float64 `json:"y"`
+                                Label string  `json:"label"`
+                        }
+                        if err := json.Unmarshal(data, &annot); err == nil {
+                                showAnnotation(annot.X, annot.Y)
+                        }
+                case "clear-annotations":
+                        hideAnnotationOverlay()
                 case "session-ended", "end-session":
                         c.Log("Session ended by technician")
                         c.shutdown()

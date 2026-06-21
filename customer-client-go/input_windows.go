@@ -88,7 +88,6 @@ import "C"
 
 import (
         "strings"
-        "unicode"
 )
 
 // init ensures a message queue exists before any input functions are called.
@@ -99,6 +98,7 @@ func init() {
 // Map browser KeyboardEvent.code to Windows virtual key codes
 var vkMap = map[string]C.WORD{
         "Enter":        0x0D,
+        "NumpadEnter":  0x0D,
         "Backspace":    0x08,
         "Tab":          0x09,
         "Escape":       0x1B,
@@ -115,6 +115,7 @@ var vkMap = map[string]C.WORD{
         "AltRight":     0xA5,
         "CapsLock":     0x14,
         "Delete":       0x2E,
+        "Insert":       0x2D,
         "End":          0x23,
         "Home":         0x24,
         "PageUp":       0x21,
@@ -131,6 +132,41 @@ var vkMap = map[string]C.WORD{
         "F10":          0x79,
         "F11":          0x7A,
         "F12":          0x7B,
+        // Punctuation and symbol keys (these were missing — caused "/" etc. to not work)
+        "Semicolon":    0xBA, // ;
+        "Equal":        0xBB, // =
+        "Comma":        0xBC, // ,
+        "Minus":        0xBD, // -
+        "Period":       0xBE, // .
+        "Slash":        0xBF, // /
+        "Backquote":    0xC0, // `
+        "BracketLeft":  0xDB, // [
+        "Backslash":    0xDC, // \
+        "BracketRight": 0xDD, // ]
+        "Quote":        0xDE, // '
+        // Numpad keys
+        "Numpad0":      0x60,
+        "Numpad1":      0x61,
+        "Numpad2":      0x62,
+        "Numpad3":      0x63,
+        "Numpad4":      0x64,
+        "Numpad5":      0x65,
+        "Numpad6":      0x66,
+        "Numpad7":      0x67,
+        "Numpad8":      0x68,
+        "Numpad9":      0x69,
+        "NumpadMultiply":  0x6A,
+        "NumpadAdd":       0x6B,
+        "NumpadSubtract":  0x6D,
+        "NumpadDecimal":   0x6E,
+        "NumpadDivide":    0x6F,
+        // Lock keys
+        "NumLock":      0x90,
+        "ScrollLock":   0x91,
+        // Windows key
+        "MetaLeft":     0x5B,
+        "MetaRight":    0x5C,
+        "ContextMenu":  0x5D,
 }
 
 // Keys that require KEYEVENTF_EXTENDEDKEY flag on Windows
@@ -138,10 +174,46 @@ func isExtended(code string) bool {
         switch code {
         case "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
                 "Delete", "Home", "End", "PageUp", "PageDown",
-                "Insert":
+                "Insert", "NumpadDivide", "NumpadEnter":
                 return true
         }
         return false
+}
+
+// symbolToVK maps single-character keys (e.key fallback when e.code is empty)
+// to Windows virtual key codes. This handles the case where the browser sends
+// e.key (e.g. "/") instead of e.code (e.g. "Slash").
+var symbolToVK = map[byte]C.WORD{
+        '/':  0xBF, // VK_OEM_2 (Slash)
+        '?':  0xBF, // shifted Slash
+        '.':  0xBE, // VK_OEM_PERIOD
+        ',':  0xBC, // VK_OEM_COMMA
+        '-':  0xBD, // VK_OEM_MINUS
+        '_':  0xBD, // shifted minus
+        '=':  0xBB, // VK_OEM_PLUS
+        '+':  0xBB, // shifted plus
+        ';':  0xBA, // VK_OEM_1
+        ':':  0xBA, // shifted semicolon
+        '\'': 0xDE, // VK_OEM_7
+        '"':  0xDE, // shifted quote
+        '[':  0xDB, // VK_OEM_4
+        '{':  0xDB, // shifted
+        ']':  0xDD, // VK_OEM_6
+        '}':  0xDD, // shifted
+        '\\': 0xDC, // VK_OEM_5
+        '|':  0xDC, // shifted
+        '`':  0xC0, // VK_OEM_3
+        '~':  0xC0, // shifted
+        '!':  0x31, // shifted 1
+        '@':  0x32, // shifted 2
+        '#':  0x33, // shifted 3
+        '$':  0x34, // shifted 4
+        '%':  0x35, // shifted 5
+        '^':  0x36, // shifted 6
+        '&':  0x37, // shifted 7
+        '*':  0x38, // shifted 8
+        '(':  0x39, // shifted 9
+        ')':  0x30, // shifted 0
 }
 
 func vkFor(code string) C.WORD {
@@ -162,7 +234,7 @@ func vkFor(code string) C.WORD {
                         return C.WORD(c)
                 }
         }
-        // Single char
+        // Single char fallback — handles both letters and symbols
         if len(code) == 1 {
                 c := code[0]
                 if c >= 'a' && c <= 'z' {
@@ -170,6 +242,13 @@ func vkFor(code string) C.WORD {
                 }
                 if c >= 'A' && c <= 'Z' {
                         return C.WORD(c)
+                }
+                if c >= '0' && c <= '9' {
+                        return C.WORD(c)
+                }
+                // Check the symbol map
+                if vk, ok := symbolToVK[c]; ok {
+                        return vk
                 }
         }
         return 0
@@ -259,15 +338,11 @@ func keyPress(code string) {
 
 func keyType(text string) {
         for _, r := range text {
-                // For uppercase letters and shifted symbols, hold shift
-                shift := unicode.IsUpper(r) || (r >= '!' && r <= '&') || r == '(' || r == ')' || r == '*' || r == '+'
-                if shift {
-                        C.sendKey(0xA0, 1) // Shift down
-                }
+                // sendUnicodeChar sends the character directly via KEYEVENTF_UNICODE,
+                // which does NOT require shift to be held — Windows handles the
+                // character as-is. The old shift logic was wrong for many symbols
+                // (_, ?, ~, etc.) and caused double-shift issues.
                 C.sendUnicodeChar(C.wchar_t(r), 1)
                 C.sendUnicodeChar(C.wchar_t(r), 0)
-                if shift {
-                        C.sendKey(0xA0, 0) // Shift up
-                }
         }
 }

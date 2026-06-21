@@ -1140,7 +1140,7 @@ export function SessionView({
                     cmdOutput.map((c) => (
                       <div key={c.id} className="bg-slate-800 rounded p-2">
                         <p className="text-[#FFC425] text-xs font-mono mb-1">$ {c.command}</p>
-                        <pre className="text-slate-300 text-xs whitespace-pre-wrap break-all max-h-64 overflow-y-auto scroll-thin">{c.output || '(waiting for output...)'}</pre>
+                        <pre className="text-slate-300 text-[11px] font-mono whitespace-pre overflow-x-auto max-h-64 overflow-y-auto scroll-thin leading-tight">{c.output?.replace(/\r\n/g, '\n').trim() || '(waiting for output...)'}</pre>
                       </div>
                     ))
                   )}
