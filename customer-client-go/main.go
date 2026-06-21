@@ -33,10 +33,10 @@ import (
         "net/http"
         "net/url"
         "os"
+        "os/exec"
         "os/signal"
         "path/filepath"
         "runtime"
-        "strconv"
         "strings"
         "sync"
         "syscall"
@@ -501,20 +501,22 @@ func main() {
         log.SetPrefix("[marqueeit] ")
 
         var (
-                code        string
-                name        string
-                server      string
-                unattended  string
-                install     string
-                uninstall   bool
-                showVer     bool
-                readyMarker string
-                elevatedLog string
+                code         string
+                name         string
+                server       string
+                unattended   string
+                unattendedSvc string
+                install      string
+                uninstall    bool
+                showVer      bool
+                readyMarker  string
+                elevatedLog  string
         )
         flag.StringVar(&code, "code", "", "6-character session code (will prompt if omitted)")
         flag.StringVar(&name, "name", "", "Your name (will prompt if omitted)")
         flag.StringVar(&server, "server", DefaultServer, "MarqueeIT server URL")
         flag.StringVar(&unattended, "unattended", "", "Run in unattended mode (provide machine code)")
+        flag.StringVar(&unattendedSvc, "unattended-svc", "", "Run as the SYSTEM service (Session 0) — just launches the user-session helper and waits")
         flag.StringVar(&install, "install", "", "Install as a persistent service with the given machine code")
         flag.BoolVar(&uninstall, "uninstall", false, "Uninstall the persistent service")
         flag.BoolVar(&showVer, "version", false, "Print version and exit")
@@ -601,6 +603,29 @@ func main() {
                                 log.Printf("Extracted code from filename: %s", code)
                         }
                 }
+        }
+
+        // --unattended-svc: We're running as the SYSTEM service in Session 0.
+        // We can't capture the screen from here (Session 0 is isolated from the
+        // user's desktop). Our only job is to launch the user-session helper via
+        // the scheduled task, then block forever so the SCM thinks we're running.
+        // The scheduled task (created during install) runs the actual unattended
+        // client in the user's interactive session.
+        if unattendedSvc != "" {
+                if isWindowsService() {
+                        log.Printf("[svc] MarqueeIT service started (Session 0, machine code %s)", unattendedSvc)
+                        log.Printf("[svc] Launching user-session helper via scheduled task...")
+                        // Run the scheduled task to start the user-session instance
+                        exec.Command("schtasks", "/run", "/tn", "MarqueeIT").Start()
+                        // Block forever — the SCM will kill us on stop/shutdown.
+                        // We use the SCM wrapper so we respond to control requests.
+                        if err := runAsWindowsService("", ""); err != nil {
+                                log.Fatalf("Service failed: %v", err)
+                        }
+                        return
+                }
+                // If not running as a service (e.g., manual test), just run unattended
+                unattended = unattendedSvc
         }
 
         if unattended != "" {
@@ -835,6 +860,3 @@ WantedBy=default.target
                 }
         }
 }
-
-// trick to keep the strconv import used (for future key code conversions)
-var _ = strconv.Itoa

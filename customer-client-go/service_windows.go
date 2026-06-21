@@ -29,19 +29,29 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
         // The default 30s timeout starts counting from when SCM launched us.
         changes <- svc.Status{State: svc.StartPending, Accepts: 0}
 
-        // Start the actual unattended client in a goroutine. This is the key
-        // fix: the network registration, WS dial, heartbeat loop, etc. all run
-        // in the background while we immediately report SERVICE_RUNNING to SCM.
         ctx, cancel := context.WithCancel(context.Background())
         defer cancel()
 
-        go func() {
-                c := NewClient(s.serverURL, "", hostname())
-                go handleSignals(cancel)
-                if err := c.RunUnattended(ctx, s.machineCode); err != nil {
-                        log.Printf("[service] RunUnattended failed: %v", err)
-                }
-        }()
+        // If we have a machine code, run the full unattended client (screen
+        // capture + heartbeat). This is used when the service runs directly
+        // in the user's session (e.g., via scheduled task).
+        //
+        // If machineCode is empty, we're in --unattended-svc mode (Session 0).
+        // We can't capture the screen from Session 0, so we just block and
+        // keep the service alive. The user-session helper (launched via
+        // scheduled task) does the actual work.
+        if s.machineCode != "" {
+                go func() {
+                        c := NewClient(s.serverURL, "", hostname())
+                        go handleSignals(cancel)
+                        if err := c.RunUnattended(ctx, s.machineCode); err != nil {
+                                log.Printf("[service] RunUnattended failed: %v", err)
+                        }
+                }()
+        } else {
+                log.Printf("[service] Running in Session 0 mode (no screen capture). " +
+                        "User-session helper should be launched via scheduled task.")
+        }
 
         // Give the goroutine a moment to start, then report RUNNING.
         // This must happen well within the 30s SCM timeout.

@@ -250,6 +250,8 @@ func installWindowsService(exe, machineCode, serverURL string) error {
 
 func uninstallWindowsService() error {
         serviceName := "MarqueeIT"
+        // Delete the scheduled task first (non-fatal if it doesn't exist)
+        exec.Command("schtasks", "/delete", "/tn", "MarqueeIT", "/f").Run()
         exec.Command("sc", "stop", serviceName).Run()
         output, err := exec.Command("sc", "delete", serviceName).CombinedOutput()
         if err != nil {

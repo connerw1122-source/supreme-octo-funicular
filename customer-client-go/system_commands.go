@@ -239,7 +239,9 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         //    `Start-Process file.vbs -Verb RunAs` doesn't reliably
                         //    trigger UAC on all Windows versions).
 
-                        // Try direct removal first (works if SYSTEM or already admin)
+                        // Try direct removal first (works if SYSTEM or already admin).
+                        // Also delete the scheduled task (non-fatal if it doesn't exist).
+                        exec.Command("schtasks", "/delete", "/tn", "MarqueeIT", "/f").Run()
                         stopOut, _ := exec.Command("sc", "stop", serviceName).CombinedOutput()
                         _ = stopOut
                         time.Sleep(1 * time.Second)
@@ -274,13 +276,15 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         // The bat stops and deletes the service, writing output to files.
                         // We add a 2-second delay at the start so this process can send
                         // the result before the service (which might be us) gets stopped.
+                        // Also deletes the scheduled task that runs the user-session helper.
                         bat := fmt.Sprintf(`@echo off
 timeout /t 2 /nobreak >nul
 sc stop "%s" > "%s" 2>&1
 timeout /t 1 /nobreak >nul
 sc delete "%s" > "%s" 2>&1
+schtasks /delete /tn "MarqueeIT" /f >> "%s" 2>&1
 echo DONE > "%s"
-`, serviceName, errPath, serviceName, errPath, donePath)
+`, serviceName, errPath, serviceName, errPath, errPath, donePath)
                         os.WriteFile(tmpBat, []byte(bat), 0644)
                         // VBS wrapper runs the bat silently (no cmd window flash)
                         vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
