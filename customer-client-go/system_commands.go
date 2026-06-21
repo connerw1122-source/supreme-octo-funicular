@@ -224,6 +224,128 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 os.Remove(logFile)
                 globalClient.shutdown()
 
+        // --- Toggle UAC Secure Desktop ---
+        // When enabled (secure desktop ON), UAC prompts appear on an isolated
+        // desktop that the customer client cannot capture or interact with.
+        // When disabled (secure desktop OFF), UAC prompts appear on the normal
+        // desktop, so the technician can see and click them.
+        //
+        // This is the same setting ScreenConnect/TeamViewer recommend for full
+        // UAC control. It slightly reduces security (any process can click UAC
+        // prompts), but for remote support it's necessary.
+        //
+        // Registry key:
+        // HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System
+        //   PromptOnSecureDesktop = 0 (off) or 1 (on, default)
+        //
+        // Requires admin — uses the same UAC elevation approach as other commands.
+        case "set-uac-secure-desktop":
+                enabled, _ := msg["enabled"].(bool)
+                if runtime.GOOS == "windows" {
+                        var value int
+                        if enabled {
+                                value = 1
+                        } else {
+                                value = 0
+                        }
+                        // Use PowerShell to set the registry value (requires admin).
+                        // If we're already admin (e.g., elevated session or SYSTEM),
+                        // this works directly. If not, we need UAC elevation.
+                        psCmd := fmt.Sprintf(
+                                `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord`,
+                                value)
+                        // Try direct first (works if already admin)
+                        out, err := winExecPowerShellHidden(psCmd)
+                        if err == nil {
+                                status := "enabled"
+                                if !enabled {
+                                        status = "disabled"
+                                }
+                                sendJSON(map[string]interface{}{
+                                        "type":   "uac-secure-desktop-result",
+                                        "result": "success",
+                                        "enabled": enabled,
+                                        "status": status,
+                                })
+                        } else {
+                                // Need UAC elevation
+                                tmpVbs := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.vbs")
+                                tmpBat := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.bat")
+                                donePath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-done.txt")
+                                errPath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-err.txt")
+                                os.Remove(donePath)
+                                os.Remove(errPath)
+                                bat := fmt.Sprintf(`@echo off
+powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "%s" > "%s" 2>&1
+echo DONE > "%s"
+`, psCmd, errPath, donePath)
+                                os.WriteFile(tmpBat, []byte(bat), 0644)
+                                vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "%s", 0, True
+`, tmpBat)
+                                os.WriteFile(tmpVbs, []byte(vbs), 0644)
+                                elevCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+                                        fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, tmpVbs))
+                                elevCmd.SysProcAttr = &syscall.SysProcAttr{}
+                                hideWindow(elevCmd.SysProcAttr)
+                                elevCmd.Start()
+                                elevCmd.Wait()
+                                // Wait for done marker (up to 30s for UAC click)
+                                done := false
+                                for i := 0; i < 60; i++ {
+                                        if _, err := os.Stat(donePath); err == nil {
+                                                done = true
+                                                break
+                                        }
+                                        time.Sleep(500 * time.Millisecond)
+                                }
+                                os.Remove(tmpBat)
+                                os.Remove(tmpVbs)
+                                errContent, _ := os.ReadFile(errPath)
+                                os.Remove(donePath)
+                                os.Remove(errPath)
+                                if done {
+                                        status := "enabled"
+                                        if !enabled {
+                                                status = "disabled"
+                                        }
+                                        sendJSON(map[string]interface{}{
+                                                "type":    "uac-secure-desktop-result",
+                                                "result":  "success",
+                                                "enabled": enabled,
+                                                "status":  status,
+                                        })
+                                } else {
+                                        errMsg := "UAC prompt was not approved (timed out)"
+                                        if len(errContent) > 0 {
+                                                errMsg += ": " + strings.TrimSpace(string(errContent))
+                                        }
+                                        sendJSON(map[string]interface{}{
+                                                "type":   "uac-secure-desktop-result",
+                                                "result": "error: " + errMsg,
+                                        })
+                                }
+                        }
+                } else {
+                        sendJSON(map[string]interface{}{
+                                "type":   "uac-secure-desktop-result",
+                                "result": "error: Windows-only feature",
+                        })
+                }
+
+        // --- Query UAC Secure Desktop status ---
+        case "get-uac-secure-desktop":
+                if runtime.GOOS == "windows" {
+                        out, _ := winExecPowerShellHidden(
+                                `(Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -ErrorAction SilentlyContinue).PromptOnSecureDesktop`)
+                        out = strings.TrimSpace(out)
+                        enabled := out == "1" || out == ""
+                        sendJSON(map[string]interface{}{
+                                "type":    "uac-secure-desktop-status",
+                                "enabled": enabled,
+                        })
+                }
+
         // --- Remove unattended service ---
         case "remove-unattended":
                 if runtime.GOOS == "windows" {

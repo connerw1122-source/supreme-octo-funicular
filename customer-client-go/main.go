@@ -339,7 +339,8 @@ func (c *Client) readLoop() {
                                                 "set-quality", "get-sysinfo", "reboot",
                                                 "recording-start", "recording-stop",
                                                 "install-unattended", "elevate-session", "remove-unattended",
-                                                "get-event-logs":
+                                                "get-event-logs",
+                                                "set-uac-secure-desktop", "get-uac-secure-desktop":
                                                 HandleSystemCommand(sysMsg)
                                         }
                                 }
@@ -607,16 +608,25 @@ func main() {
 
         // --unattended-svc: We're running as the SYSTEM service in Session 0.
         // We can't capture the screen from here (Session 0 is isolated from the
-        // user's desktop). Our only job is to launch the user-session helper via
-        // the scheduled task, then block forever so the SCM thinks we're running.
-        // The scheduled task (created during install) runs the actual unattended
-        // client in the user's interactive session.
+        // user's desktop). Our only job is to launch the user-session helper,
+        // then block forever so the SCM thinks we're running.
+        //
+        // The session bridge uses CreateProcessAsUserW to launch the helper
+        // directly in the user's interactive session (Session 1+). This is
+        // more reliable than the scheduled task approach because it works
+        // immediately (no logon required) and gives us a process we can monitor.
         if unattendedSvc != "" {
                 if isWindowsService() {
                         log.Printf("[svc] MarqueeIT service started (Session 0, machine code %s)", unattendedSvc)
-                        log.Printf("[svc] Launching user-session helper via scheduled task...")
-                        // Run the scheduled task to start the user-session instance
-                        exec.Command("schtasks", "/run", "/tn", "MarqueeIT").Start()
+                        // Try the session bridge first (most reliable)
+                        exe, _ := os.Executable()
+                        if pid, err := launchHelperInUserSession(exe, fmt.Sprintf("--unattended %s --server %s", unattendedSvc, server)); err != nil {
+                                log.Printf("[svc] Session bridge failed: %v — falling back to scheduled task", err)
+                                // Fallback: run the scheduled task
+                                exec.Command("schtasks", "/run", "/tn", "MarqueeIT").Start()
+                        } else {
+                                log.Printf("[svc] Launched user-session helper (pid=%d)", pid)
+                        }
                         // Block forever — the SCM will kill us on stop/shutdown.
                         // We use the SCM wrapper so we respond to control requests.
                         if err := runAsWindowsService("", ""); err != nil {

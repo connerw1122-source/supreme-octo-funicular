@@ -316,6 +316,20 @@ export function SessionView({
                 toast.success('Customer is restarting with admin privileges. They will reconnect shortly.')
               }
               break
+            case 'uac-secure-desktop-result':
+              if (msg.result === 'success') {
+                if (msg.enabled === false) {
+                  toast.success('UAC Secure Desktop DISABLED. You can now interact with UAC prompts. Click the same button again to re-enable.')
+                } else {
+                  toast.success('UAC Secure Desktop ENABLED. Default security restored.')
+                }
+              } else {
+                toast.error('UAC toggle failed: ' + (msg.result || 'unknown error'))
+              }
+              break
+            case 'uac-secure-desktop-status':
+              // Could update a UI indicator if we wanted
+              break
             case 'event-logs':
               // Either the initial "[loading...]" ack or the final output.
               // If it's the final (no pending flag), replace the pending entry;
@@ -564,6 +578,26 @@ export function SessionView({
     if (!confirm('Restart the customer\'s MarqueeIT with admin privileges? The customer will see a UAC prompt and needs to click YES. The session will briefly disconnect and reconnect.')) return
     toast.info('Requesting elevation — customer will see a UAC prompt...')
     sendSystemCommand({ type: 'elevate-session' })
+  }, [sendSystemCommand])
+
+  const toggleUACSecureDesktop = useCallback(() => {
+    if (!confirm(
+      'Disable UAC Secure Desktop?\n\n' +
+      'When disabled, UAC prompts will appear on the normal desktop instead of ' +
+      'the isolated secure desktop. This allows you to see and interact with ' +
+      'UAC prompts during remote control.\n\n' +
+      'The customer will see a UAC prompt and needs to click YES.\n\n' +
+      'Note: This slightly reduces security (any process could click UAC prompts). ' +
+      'Re-enable after the session to restore the default behavior.'
+    )) return
+    toast.info('Disabling UAC Secure Desktop — customer will see a UAC prompt...')
+    sendSystemCommand({ type: 'set-uac-secure-desktop', enabled: false })
+  }, [sendSystemCommand])
+
+  const enableUACSecureDesktop = useCallback(() => {
+    if (!confirm('Re-enable UAC Secure Desktop? This restores the default Windows security behavior.')) return
+    toast.info('Enabling UAC Secure Desktop...')
+    sendSystemCommand({ type: 'set-uac-secure-desktop', enabled: true })
   }, [sendSystemCommand])
 
   const fetchEventLogs = useCallback((logName: string, maxEvents: number = 50) => {
@@ -971,6 +1005,9 @@ export function SessionView({
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-amber-400 hover:text-amber-300" onClick={elevateSession} title="Restart with admin privileges (UAC)">
                 <Shield className="w-3.5 h-3.5" />
+              </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-purple-400 hover:text-purple-300" onClick={toggleUACSecureDesktop} title="Disable UAC Secure Desktop (allows interacting with UAC prompts)">
+                <ShieldAlert className="w-3.5 h-3.5" />
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
                 <MonitorSmartphone className="w-3.5 h-3.5" />

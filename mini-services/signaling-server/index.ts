@@ -151,6 +151,7 @@ const server = Bun.serve({
             'recording-start', 'recording-stop',
             'install-unattended', 'elevate-session', 'remove-unattended',
             'get-event-logs',
+            'set-uac-secure-desktop', 'get-uac-secure-desktop',
           ]
           if (systemCommandTypes.includes(m.type) && d.roomCode) {
             relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
@@ -162,6 +163,7 @@ const server = Bun.serve({
             'monitor-list', 'sysinfo', 'recording-ack',
             'unattended-result', 'elevate-result',
             'event-logs',
+            'uac-secure-desktop-result', 'uac-secure-desktop-status',
           ]
           if (responseTypes.includes(m.type) && d.roomCode) {
             relayToRoom(d.roomCode, JSON.stringify(m), d.peerId)
