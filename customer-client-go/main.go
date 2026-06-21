@@ -502,22 +502,24 @@ func main() {
         log.SetPrefix("[marqueeit] ")
 
         var (
-                code         string
-                name         string
-                server       string
-                unattended   string
+                code          string
+                name          string
+                server        string
+                unattended    string
                 unattendedSvc string
-                install      string
-                uninstall    bool
-                showVer      bool
-                readyMarker  string
-                elevatedLog  string
+                winlogonHelper bool
+                install       string
+                uninstall     bool
+                showVer       bool
+                readyMarker   string
+                elevatedLog   string
         )
         flag.StringVar(&code, "code", "", "6-character session code (will prompt if omitted)")
         flag.StringVar(&name, "name", "", "Your name (will prompt if omitted)")
         flag.StringVar(&server, "server", DefaultServer, "MarqueeIT server URL")
         flag.StringVar(&unattended, "unattended", "", "Run in unattended mode (provide machine code)")
         flag.StringVar(&unattendedSvc, "unattended-svc", "", "Run as the SYSTEM service (Session 0) — just launches the user-session helper and waits")
+        flag.BoolVar(&winlogonHelper, "winlogon-helper", false, "Run as a Winlogon desktop helper (captures UAC prompts)")
         flag.StringVar(&install, "install", "", "Install as a persistent service with the given machine code")
         flag.BoolVar(&uninstall, "uninstall", false, "Uninstall the persistent service")
         flag.BoolVar(&showVer, "version", false, "Print version and exit")
@@ -629,13 +631,39 @@ func main() {
                         }
                         // Block forever — the SCM will kill us on stop/shutdown.
                         // We use the SCM wrapper so we respond to control requests.
-                        if err := runAsWindowsService("", ""); err != nil {
+                        // Pass the machine code and server URL so the service can
+                        // do heartbeat + spawn Winlogon helpers for UAC interaction.
+                        if err := runAsWindowsService(server, unattendedSvc); err != nil {
                                 log.Fatalf("Service failed: %v", err)
                         }
                         return
                 }
                 // If not running as a service (e.g., manual test), just run unattended
                 unattended = unattendedSvc
+        }
+
+        // --winlogon-helper: Run as a Winlogon desktop helper. This process is
+        // spawned by the SYSTEM service ON the WinSta0\Winlogon desktop (where
+        // UAC prompts appear). It connects to the WS with the session code and
+        // captures/streams the UAC prompt screen. Input injection works because
+        // the process runs as SYSTEM (higher than any UAC integrity level).
+        //
+        // When the desktop switches back to "Default" (UAC resolved), the
+        // capture will return all-black or fail, and the helper exits.
+        if winlogonHelper {
+                if code == "" {
+                        log.Fatalf("[winlogon-helper] No session code provided")
+                        os.Exit(1)
+                }
+                log.Printf("[winlogon-helper] Starting on Winlogon desktop (code=%s server=%s)", code, server)
+                c := NewClient(server, code, hostname()+" (UAC)")
+                ctx, cancel := context.WithCancel(context.Background())
+                defer cancel()
+                go handleSignals(cancel)
+                if err := c.Run(ctx); err != nil {
+                        log.Printf("[winlogon-helper] Session ended: %v", err)
+                }
+                return
         }
 
         if unattended != "" {
