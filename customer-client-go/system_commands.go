@@ -255,7 +255,7 @@ func HandleSystemCommand(msg map[string]interface{}) {
                                 `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord`,
                                 value)
                         // Try direct first (works if already admin)
-                        out, err := winExecPowerShellHidden(psCmd)
+                        _, err := winExecPowerShellHidden(psCmd)
                         if err == nil {
                                 status := "enabled"
                                 if !enabled {
