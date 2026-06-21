@@ -146,12 +146,14 @@ import "C"
 import (
         "runtime"
         "sync"
+        "time"
         "unsafe"
 )
 
 var (
         chatMu          sync.Mutex
         chatInitialized bool
+        chatReady       = make(chan struct{})
 )
 
 // showChatOverlay creates the always-on-top chat window and adds a message.
@@ -178,12 +180,20 @@ func showChatOverlay(sender, content string) {
                 go func() {
                         runtime.LockOSThread()
                         C.createChatWindow()
+                        // Signal that the window is created and ready
+                        close(chatReady)
                         C.chatMessageLoop()
                 }()
-                // Give the window a moment to be created
-                // (addChatLine below will still work — it checks g_chatHwnd)
         } else {
                 chatMu.Unlock()
+        }
+
+        // Wait for the window to be created (up to 2 seconds)
+        select {
+        case <-chatReady:
+        case <-time.After(2 * time.Second):
+                // Window didn't create in time — drop the message
+                return
         }
 
         cSender := C.CString(sender)

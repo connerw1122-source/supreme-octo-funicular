@@ -117,9 +117,13 @@ import "C"
 import (
         "runtime"
         "sync"
+        "time"
 )
 
-var annotOnce sync.Once
+var (
+        annotOnce  sync.Once
+        annotReady = make(chan struct{})
+)
 
 // showAnnotation displays a highlight ring at the given relative coordinates
 // on the customer's screen. Called when the technician clicks in highlight mode.
@@ -128,12 +132,24 @@ func showAnnotation(relX, relY float64) {
                 return
         }
         annotOnce.Do(func() {
-                C.createAnnotWindow()
+                // Create the window AND run the message loop on the SAME locked
+                // OS thread (Win32 windows are thread-affine). Signal via channel
+                // when the window is ready so the caller doesn't call
+                // showAnnotationAt before the window exists.
                 go func() {
                         runtime.LockOSThread()
+                        C.createAnnotWindow()
+                        // Signal that the window is created
+                        close(annotReady)
                         C.annotMessageLoop()
                 }()
         })
+        // Wait for the window to be created (up to 2 seconds)
+        select {
+        case <-annotReady:
+        case <-time.After(2 * time.Second):
+                return
+        }
         C.showAnnotationAt(C.double(relX), C.double(relY))
 }
 

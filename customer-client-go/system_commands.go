@@ -369,6 +369,24 @@ WshShell.Run "%s", 0, True
                 result := "installed"
                 if err != nil {
                         result = "error: " + err.Error()
+                } else {
+                        // Also start a background --unattended process RIGHT NOW
+                        // in the current user's interactive session. The scheduled
+                        // task only runs at logon, so without this, unattended
+                        // access wouldn't work until the user logs off and back on.
+                        // This process runs in the same session as the current
+                        // customer client, so it CAN see the desktop.
+                        if runtime.GOOS == "windows" {
+                                exe, _ := os.Executable()
+                                bgCmd := exec.Command(exe, "--unattended", machineCode, "--server", serverURL)
+                                bgCmd.SysProcAttr = &syscall.SysProcAttr{}
+                                hideWindow(bgCmd.SysProcAttr)
+                                if startErr := bgCmd.Start(); startErr != nil {
+                                        log.Printf("[install-unattended] could not start background process: %v", startErr)
+                                } else {
+                                        log.Printf("[install-unattended] started background unattended process (pid=%d)", bgCmd.Process.Pid)
+                                }
+                        }
                 }
                 sendJSON(map[string]interface{}{
                         "type":        "unattended-result",
@@ -773,7 +791,16 @@ func getExpandedSysInfo() map[string]interface{} {
 func rebootMachine() {
         switch runtime.GOOS {
         case "windows":
-                exec.Command("shutdown", "/r", "/t", "5", "/c", "MarqueeIT remote reboot").Start()
+                // Use shutdown.exe with /r (reboot) /t 5 (5 second delay).
+                // Use Run() (blocking) instead of Start() so the command actually
+                // executes before the goroutine exits. Start() was causing the
+                // process to be killed before shutdown.exe could run.
+                cmd := exec.Command("shutdown", "/r", "/t", "5", "/c", "MarqueeIT remote reboot")
+                cmd.SysProcAttr = &syscall.SysProcAttr{}
+                hideWindow(cmd.SysProcAttr)
+                if err := cmd.Run(); err != nil {
+                        log.Printf("[reboot] shutdown command failed: %v", err)
+                }
         case "linux":
                 exec.Command("sudo", "reboot").Start()
         case "darwin":
