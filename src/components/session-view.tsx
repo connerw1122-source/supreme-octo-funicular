@@ -289,7 +289,7 @@ export function SessionView({
               setAnnotations((prev) => [...prev, annotation])
               setTimeout(() => {
                 setAnnotations((prev) => prev.filter((x) => x.id !== annotation.id))
-              }, 6000)
+              }, 2000)
               break
             }
             case 'clear-annotations':
@@ -772,7 +772,7 @@ export function SessionView({
     wsRef.current?.send(JSON.stringify({ type: 'annotation', x: a.x, y: a.y, label: a.label }))
     setTimeout(() => {
       setAnnotations((prev) => prev.filter((x) => x.id !== a.id))
-    }, 6000)
+    }, 2000)
   }
 
   const toggleFullscreen = () => {

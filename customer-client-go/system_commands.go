@@ -363,16 +363,15 @@ WshShell.Run "%s", 0, True
                 if runtime.GOOS == "windows" {
                         serviceName := "MarqueeIT"
 
-                        // Strategy:
-                        // 1. If we're running as SYSTEM (the service itself), we don't
-                        //    need UAC — sc stop/sc delete work directly.
-                        // 2. If we're running as an interactive user, try sc delete
-                        //    directly first (works if already admin). If access denied,
-                        //    elevate via UAC.
-                        // 3. The UAC elevation uses `Start-Process wscript.exe -Verb RunAs`
-                        //    (elevating wscript.exe explicitly, NOT the .vbs file —
-                        //    `Start-Process file.vbs -Verb RunAs` doesn't reliably
-                        //    trigger UAC on all Windows versions).
+                        // First, kill any running MarqueeIT processes (the background
+                        // --unattended process, the service helper, etc.) so they don't
+                        // interfere with removal or re-register after we delete.
+                        exec.Command("taskkill", "/im", "marqueeit-client-windows.exe", "/f").Run()
+                        // Also try the generic name in case the exe was renamed
+                        if exe, err := os.Executable(); err == nil {
+                                exec.Command("taskkill", "/im", filepath.Base(exe), "/f").Run()
+                        }
+                        time.Sleep(1 * time.Second)
 
                         // Try direct removal first (works if SYSTEM or already admin).
                         // Also delete the scheduled task (non-fatal if it doesn't exist).
@@ -381,22 +380,23 @@ WshShell.Run "%s", 0, True
                         _ = stopOut
                         time.Sleep(1 * time.Second)
                         deleteOut, deleteErr := exec.Command("sc", "delete", serviceName).CombinedOutput()
-                        if deleteErr == nil {
+                        deleteOutStr := strings.TrimSpace(string(deleteOut))
+                        if deleteErr == nil || strings.Contains(deleteOutStr, "SUCCESS") {
                                 // Success — no UAC needed
                                 sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
                                 return
                         }
                         // Check if the service doesn't exist (already removed)
-                        if strings.Contains(string(deleteOut), "does not exist") || strings.Contains(string(deleteOut), "1060") {
+                        if strings.Contains(deleteOutStr, "does not exist") || strings.Contains(deleteOutStr, "1060") || strings.Contains(deleteOutStr, "not exist") {
                                 sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
                                 return
                         }
                         // Access denied — need UAC elevation
-                        if !strings.Contains(string(deleteOut), "Access") && !strings.Contains(string(deleteOut), "denied") && !strings.Contains(string(deleteOut), "5") {
+                        if !strings.Contains(deleteOutStr, "Access") && !strings.Contains(deleteOutStr, "denied") && !strings.Contains(deleteOutStr, "5") {
                                 // Some other error
                                 sendJSON(map[string]interface{}{
                                         "type":   "unattended-result",
-                                        "result": "error: sc delete failed: " + strings.TrimSpace(string(deleteOut)),
+                                        "result": "error: sc delete failed: " + deleteOutStr,
                                 })
                                 return
                         }
@@ -408,28 +408,23 @@ WshShell.Run "%s", 0, True
                         errPath := filepath.Join(os.TempDir(), "marqueeit-remove-err.txt")
                         os.Remove(donePath)
                         os.Remove(errPath)
-                        // The bat stops and deletes the service, writing output to files.
-                        // We add a 2-second delay at the start so this process can send
-                        // the result before the service (which might be us) gets stopped.
-                        // Also deletes the scheduled task that runs the user-session helper.
+                        // The bat kills processes, stops and deletes the service,
+                        // and deletes the scheduled task. Writes output to errPath
+                        // so we can verify success.
                         bat := fmt.Sprintf(`@echo off
 timeout /t 2 /nobreak >nul
+taskkill /im "marqueeit-client-windows.exe" /f >nul 2>&1
 sc stop "%s" > "%s" 2>&1
 timeout /t 1 /nobreak >nul
-sc delete "%s" > "%s" 2>&1
+sc delete "%s" >> "%s" 2>&1
 schtasks /delete /tn "MarqueeIT" /f >> "%s" 2>&1
 echo DONE > "%s"
 `, serviceName, errPath, serviceName, errPath, errPath, donePath)
                         os.WriteFile(tmpBat, []byte(bat), 0644)
-                        // VBS wrapper runs the bat silently (no cmd window flash)
                         vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run "%s", 0, True
 `, tmpBat)
                         os.WriteFile(tmpVbs, []byte(vbs), 0644)
-                        // Elevate wscript.exe explicitly (NOT the .vbs file).
-                        // `Start-Process file.vbs -Verb RunAs` doesn't reliably trigger
-                        // UAC — we must elevate the executable (wscript.exe) and pass
-                        // the .vbs path as an argument.
                         psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`,
                                 tmpVbs)
                         cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
@@ -444,11 +439,8 @@ WshShell.Run "%s", 0, True
                                 os.Remove(tmpVbs)
                                 return
                         }
-                        // Wait for PowerShell itself to finish (it returns immediately
-                        // after triggering UAC — the elevated process runs in background)
                         cmd.Wait()
-                        // Wait for the done marker (up to 30 seconds — gives the
-                        // customer time to see and click Yes on the UAC prompt)
+                        // Wait for the done marker (up to 30 seconds)
                         removed := false
                         for i := 0; i < 60; i++ {
                                 if _, err := os.Stat(donePath); err == nil {
@@ -459,16 +451,20 @@ WshShell.Run "%s", 0, True
                         }
                         os.Remove(tmpBat)
                         os.Remove(tmpVbs)
-                        // Read any error output from sc.exe
                         errContent, _ := os.ReadFile(errPath)
                         os.Remove(donePath)
                         os.Remove(errPath)
-                        if removed {
+                        errStr := strings.TrimSpace(string(errContent))
+                        // Verify that sc delete actually succeeded by checking the output
+                        if removed && strings.Contains(errStr, "SUCCESS") {
+                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                        } else if removed && (strings.Contains(errStr, "not exist") || strings.Contains(errStr, "1060")) {
+                                // Service didn't exist — already removed
                                 sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
                         } else {
-                                errMsg := "error: service removal timed out — the customer may have clicked No on the UAC prompt"
-                                if len(errContent) > 0 {
-                                        errMsg += "\nsc output: " + strings.TrimSpace(string(errContent))
+                                errMsg := "error: service removal failed — the customer may have clicked No on the UAC prompt"
+                                if errStr != "" {
+                                        errMsg += "\nOutput: " + errStr
                                 }
                                 sendJSON(map[string]interface{}{"type": "unattended-result", "result": errMsg})
                         }
