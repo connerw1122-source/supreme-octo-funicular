@@ -33,11 +33,11 @@ import {
   Terminal,
   Activity,
   MonitorSmartphone,
-  Settings,
   Power,
   RefreshCw,
   Shield,
   ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -88,7 +88,6 @@ export function SessionView({
   const [annotations, setAnnotations] = useState<Annotation[]>([])
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [showAnnotationMode, setShowAnnotationMode] = useState(false)
-  const [copiedCode, setCopiedCode] = useState(false)
   const [controlMode, setControlMode] = useState(false)
   const [connected, setConnected] = useState(false)
   const [customerConnected, setCustomerConnected] = useState(false)
@@ -216,6 +215,18 @@ export function SessionView({
               if (msg.role === 'customer') {
                 setCustomerConnected(true)
                 toast.success(`${msg.name} connected`)
+                // Reset all customer-derived state — the new customer process
+                // starts fresh, so the UI must match. Without this, the technician
+                // could click "Unlock input" and actually LOCK it (because the UI
+                // thinks it's locked from the previous session, but the new
+                // customer process has input unlocked).
+                setInputLocked(false)
+                setScreenLocked(false)
+                setControlMode(false)
+                setCurrentMonitorIdx(0)
+                setQualityLevel(55)
+                setFpsLevel(30)
+                pressedKeysRef.current.clear()
                 // Auto-grab system info when customer connects
                 setTimeout(() => sendSystemCommand({ type: 'get-sysinfo' }), 1000)
                 // Auto-list monitors
@@ -513,8 +524,8 @@ export function SessionView({
 
   const killProc = useCallback((pid: number) => {
     sendSystemCommand({ type: 'kill-process', pid })
-    toast.success(`Killed PID ${pid}`)
-    setTimeout(refreshProcesses, 1000)
+    toast.info(`Killing PID ${pid}...`)
+    setTimeout(refreshProcesses, 1500)
   }, [sendSystemCommand, refreshProcesses])
 
   const refreshMonitors = useCallback(() => {
@@ -524,7 +535,7 @@ export function SessionView({
   const switchMon = useCallback((index: number) => {
     sendSystemCommand({ type: 'switch-monitor', index })
     setCurrentMonitorIdx(index)
-    toast.success(`Switched to monitor ${index + 1}`)
+    toast.info(`Switching to monitor ${index + 1}...`)
   }, [sendSystemCommand])
 
   const changeQuality = useCallback((quality: number, fps: number) => {
@@ -537,14 +548,21 @@ export function SessionView({
     const newLock = !inputLocked
     sendSystemCommand({ type: newLock ? 'lock-input' : 'unlock-input' })
     setInputLocked(newLock)
-    toast.success(newLock ? 'Customer input locked' : 'Customer input unlocked')
+    toast.info(newLock ? 'Locking customer input...' : 'Unlocking customer input...')
   }, [inputLocked, sendSystemCommand])
 
   const toggleScreenLock = useCallback(() => {
     const newLock = !screenLocked
-    sendSystemCommand({ type: newLock ? 'lock-screen' : 'unlock-screen' })
-    setScreenLocked(newLock)
-    toast.success(newLock ? 'Customer screen locked' : 'Customer screen unlocked')
+    if (newLock) {
+      // Locking — this works (calls LockWorkStation)
+      sendSystemCommand({ type: 'lock-screen' })
+      setScreenLocked(true)
+      toast.info('Locking customer screen...')
+    } else {
+      // Unlocking — Windows doesn't allow remote unlock (security).
+      // The customer must enter their password/PIN manually.
+      toast.warning('Cannot unlock the screen remotely — ask the customer to log back in.')
+    }
   }, [screenLocked, sendSystemCommand])
 
   const sendCAD = useCallback(() => {
@@ -719,20 +737,24 @@ export function SessionView({
     wsRef.current?.send(JSON.stringify({ type: 'clear-annotations' }))
   }
 
-  const copyCode = () => {
-    navigator.clipboard.writeText(roomCode)
-    setCopiedCode(true)
-    toast.success('Code copied')
-    setTimeout(() => setCopiedCode(false), 1500)
-  }
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // File transfer is not yet supported in the new WS-only protocol.
-    // For now, just notify the technician.
-    const file = e.target.files?.[0]
-    if (!file) return
-    toast.info(`File transfer is not yet supported in the WebSocket protocol. Share files via chat instead.`)
-    e.target.value = ''
+  const handleStageClick = (e: React.MouseEvent) => {
+    if (controlMode) return
+    if (!showAnnotationMode) return
+    const coords = getRelativeCoords(e)
+    if (!coords) return
+    const a: Annotation = {
+      id: Math.random().toString(36).slice(2),
+      x: coords.x,
+      y: coords.y,
+      label: 'Click here',
+      createdAt: Date.now(),
+    }
+    setAnnotations((prev) => [...prev, a])
+    // Send the annotation with the correct relative coordinates
+    wsRef.current?.send(JSON.stringify({ type: 'annotation', x: a.x, y: a.y, label: a.label }))
+    setTimeout(() => {
+      setAnnotations((prev) => prev.filter((x) => x.id !== a.id))
+    }, 6000)
   }
 
   const toggleFullscreen = () => {
@@ -1009,6 +1031,9 @@ export function SessionView({
               <Button size="sm" variant="ghost" className="h-7 px-2 text-purple-400 hover:text-purple-300" onClick={toggleUACSecureDesktop} title="Disable UAC Secure Desktop (allows interacting with UAC prompts)">
                 <ShieldAlert className="w-3.5 h-3.5" />
               </Button>
+              <Button size="sm" variant="ghost" className="h-7 px-2 text-green-400 hover:text-green-300" onClick={enableUACSecureDesktop} title="Re-enable UAC Secure Desktop (restores default security)">
+                <ShieldCheck className="w-3.5 h-3.5" />
+              </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
                 <MonitorSmartphone className="w-3.5 h-3.5" />
               </Button>
@@ -1114,7 +1139,16 @@ export function SessionView({
                 )}
                 {expandedSysInfo && (
                   <div>
-                    <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">System Details</p>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs text-slate-500 uppercase tracking-wide">System Details</p>
+                      <button
+                        onClick={getExpandedInfo}
+                        className="text-slate-500 hover:text-[#FFC425] transition-colors"
+                        title="Refresh system info"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    </div>
                     <div className="space-y-2 text-xs text-slate-300">
                       {expandedSysInfo.uptime && (
                         <div>

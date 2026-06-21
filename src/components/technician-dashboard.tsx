@@ -471,8 +471,8 @@ export function TechnicianDashboard({
                                     Join
                                   </Button>
                                 )}
-                                {/* Reconnect button for ended/invalid unattended sessions */}
-                                {s.unattendedMachineCode && (
+                                {/* Reconnect button for ended/waiting unattended sessions only */}
+                                {s.unattendedMachineCode && (s.status === 'ended' || s.status === 'waiting') && (
                                   <Button
                                     size="sm"
                                     variant="outline"

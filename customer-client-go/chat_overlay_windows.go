@@ -290,6 +290,9 @@ func chatReplyPoller() {
                 if reply == "" {
                         continue
                 }
+                // Echo the reply back to the customer's own chat overlay so they
+                // can see what they sent (visual confirmation).
+                showChatOverlay("You", reply)
                 // Send the reply to the technician via the signaling server
                 msg, _ := json.Marshal(map[string]interface{}{
                         "type":    "chat",
@@ -298,8 +301,11 @@ func chatReplyPoller() {
                 })
                 globalClient.connMu.Lock()
                 if globalClient.conn != nil {
-                        globalClient.conn.WriteMessage(1, msg)
-                        fmt.Printf("[chat] Sent reply: %s\n", reply)
+                        if writeErr := globalClient.conn.WriteMessage(1, msg); writeErr != nil {
+                                fmt.Printf("[chat] Failed to send reply: %v\n", writeErr)
+                        } else {
+                                fmt.Printf("[chat] Sent reply: %s\n", reply)
+                        }
                 }
                 globalClient.connMu.Unlock()
         }
