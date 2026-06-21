@@ -84,14 +84,12 @@ func generateMachineCode() string {
 // installServiceElevated installs the service with admin privileges.
 // On Windows, triggers a UAC prompt. On Linux/Mac, uses sudo.
 func installServiceElevated(machineCode, serverURL string) error {
-        exe, err := os.Executable()
-        if err != nil {
-                return fmt.Errorf("cannot find executable: %w", err)
-        }
-
         if runtime.GOOS == "windows" {
                 serviceName := "MarqueeIT"
-                exe, _ := os.Executable()
+                exe, err := os.Executable()
+                if err != nil {
+                        return fmt.Errorf("cannot find executable: %w", err)
+                }
 
                 // IMPORTANT: We install BOTH a Windows service AND a scheduled task.
                 //
