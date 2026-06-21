@@ -85,6 +85,7 @@ import (
         "log"
         "strings"
         "sync"
+        "time"
         "unsafe"
 
         "github.com/kbinani/screenshot"
@@ -94,10 +95,11 @@ import (
 // black (e.g., Winlogon desktop we can't access), we re-send the last good
 // frame so the technician doesn't see a black screen.
 var (
-        lastGoodFrame     *image.RGBA
-        lastGoodFrameMu   sync.Mutex
-        lastDesktopName   = "Default"
-        lockedNotified    = false // avoid spamming the log
+        lastGoodFrame   *image.RGBA
+        lastGoodFrameMu sync.Mutex
+        lastDesktopName = "Default"
+        lockedNotified  = false // avoid spamming the log
+        lastCacheTime   time.Time
 )
 
 // captureScreenWindows captures the active desktop (including lock screen)
@@ -106,11 +108,23 @@ var (
 // falls back to the last good frame so the technician sees a frozen frame
 // instead of black.
 func captureScreenWindows() (*image.RGBA, error) {
+        // Query the screen dimensions FIRST so we can size the buffer correctly.
+        // This prevents buffer overflows on >4K displays (5K, 8K, multi-monitor
+        // stitched desktops) that exceed the old hardcoded 3840*2160*4 max.
+        screenW := int(C.GetSystemMetrics(C.SM_CXSCREEN))
+        screenH := int(C.GetSystemMetrics(C.SM_CYSCREEN))
+        if screenW <= 0 || screenH <= 0 {
+                return captureScreenKbinani()
+        }
+        bufSize := screenW * screenH * 4
+        if bufSize > 7680*4320*4 {
+                // Sanity cap at 8K to prevent absurd allocations
+                bufSize = 7680 * 4320 * 4
+        }
+
         var w, h C.int
         var deskNameBuf [256]byte
-        // Allocate max buffer (4 bytes per pixel, max 4K resolution)
-        maxSize := 3840 * 2160 * 4
-        buf := make([]byte, maxSize)
+        buf := make([]byte, bufSize)
         ret := C.captureActiveDesktop(
                 (*C.char)(unsafe.Pointer(&buf[0])),
                 &w, &h,
@@ -132,6 +146,12 @@ func captureScreenWindows() (*image.RGBA, error) {
 
         width := int(w)
         height := int(h)
+        // Safety: if the C function somehow wrote more than bufSize, truncate.
+        // (Shouldn't happen with the pre-sized buffer, but defense in depth.)
+        if width*height*4 > len(buf) {
+                width = screenW
+                height = screenH
+        }
         img := image.NewRGBA(image.Rect(0, 0, width, height))
         // The buffer is BGRA, convert to RGBA
         for y := 0; y < height; y++ {
@@ -168,10 +188,16 @@ func captureScreenWindows() (*image.RGBA, error) {
 }
 
 // cacheGoodFrame stores a copy of the most recent good frame.
+// Throttled to once per second to avoid 240+ MB/s of allocations at 30 FPS
+// (each 1080p frame is ~8MB, 4K is ~33MB).
 func cacheGoodFrame(img *image.RGBA) {
+        now := time.Now()
+        if now.Sub(lastCacheTime) < time.Second {
+                return // already cached recently
+        }
+        lastCacheTime = now
         lastGoodFrameMu.Lock()
         defer lastGoodFrameMu.Unlock()
-        // Shallow copy of the Pix slice is enough — we never mutate it after caching.
         dup := *img
         dup.Pix = make([]byte, len(img.Pix))
         copy(dup.Pix, img.Pix)

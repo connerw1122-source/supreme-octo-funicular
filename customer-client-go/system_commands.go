@@ -74,6 +74,18 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 command, _ := msg["command"].(string)
                 elevated, _ := msg["elevated"].(bool)
                 id, _ := msg["id"].(string)
+                // Send immediate acknowledgment BEFORE starting the goroutine,
+                // so the [running...] entry is created before the final output
+                // can arrive. (Previous code started the goroutine first, causing
+                // a race where the final output could arrive before the ack and
+                // be silently dropped by the UI.)
+                sendJSON(map[string]interface{}{
+                        "type":    "command-output",
+                        "output":  "[running...]",
+                        "id":      id,
+                        "command": command,
+                        "final":   false,
+                })
                 // Run in a goroutine so it doesn't block the read loop
                 go func() {
                         var result string
@@ -90,14 +102,6 @@ func HandleSystemCommand(msg map[string]interface{}) {
                                 "final":   true,
                         })
                 }()
-                // Send immediate acknowledgment
-                sendJSON(map[string]interface{}{
-                        "type":    "command-output",
-                        "output":  "[running...]",
-                        "id":      id,
-                        "command": command,
-                        "final":   false,
-                })
 
         // --- Task Manager ---
         case "list-processes":
@@ -162,9 +166,20 @@ func HandleSystemCommand(msg map[string]interface{}) {
                 // will write progress to the log file so we can diagnose failures.
                 // CLI args are the ONLY reliable way to pass data through
                 // Start-Process -Verb RunAs (env vars don't propagate).
+                //
+                // SECURITY: Escape single quotes in all values by doubling them
+                // (PowerShell single-quote escaping). Without this, a customer name
+                // like "O'Brien" would break the command, and a malicious name like
+                // "foo'; Remove-Item C:\ -Recurse; 'bar" would execute arbitrary
+                // PowerShell as admin.
+                escCode := strings.ReplaceAll(globalClient.code, "'", "''")
+                escName := strings.ReplaceAll(globalClient.name, "'", "''")
+                escServer := strings.ReplaceAll(globalClient.serverURL, "'", "''")
+                escMarker := strings.ReplaceAll(markerFile, "'", "''")
+                escLog := strings.ReplaceAll(logFile, "'", "''")
                 psCmd := fmt.Sprintf(
                         `Start-Process -FilePath "%s" -ArgumentList '-code','%s','-name','%s','-server','%s','-ready-marker','%s','-elevated-log','%s' -Verb RunAs`,
-                        exe, globalClient.code, globalClient.name, globalClient.serverURL, markerFile, logFile)
+                        exe, escCode, escName, escServer, escMarker, escLog)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
@@ -307,6 +322,16 @@ WshShell.Run "%s", 0, True
                         maxEvents = int(mf)
                 }
                 id, _ := msg["id"].(string)
+                // Send immediate acknowledgment BEFORE starting the goroutine,
+                // so the [loading...] entry is created before the final output
+                // can arrive (same race-condition fix as exec-command).
+                sendJSON(map[string]interface{}{
+                        "type":    "event-logs",
+                        "id":      id,
+                        "logName": logName,
+                        "output":  "[loading...]",
+                        "pending": true,
+                })
                 go func() {
                         output := getEventLogs(logName, maxEvents)
                         sendJSON(map[string]interface{}{
@@ -316,14 +341,6 @@ WshShell.Run "%s", 0, True
                                 "output":  output,
                         })
                 }()
-                // Immediate acknowledgment so the UI can show "loading..."
-                sendJSON(map[string]interface{}{
-                        "type":    "event-logs",
-                        "id":      id,
-                        "logName": logName,
-                        "output":  "[loading...]",
-                        "pending": true,
-                })
         }
         }() // end goroutine
 }

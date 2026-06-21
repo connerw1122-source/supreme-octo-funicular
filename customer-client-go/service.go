@@ -124,18 +124,20 @@ WshShell.Run "%s", 0, True
                 // Wait for the done marker (up to 30 seconds)
                 donePath := filepath.Join(os.TempDir(), "marqueeit-svc-done.txt")
                 os.Remove(donePath)
+                done := false
                 for i := 0; i < 60; i++ {
                         if _, err := os.Stat(donePath); err == nil {
+                                done = true
                                 break
                         }
                         time.Sleep(500 * time.Millisecond)
                 }
-                // Best-effort: the install bat just ran elevated. The SCM wrapper
-                // (service_windows.go) handles the 30s timeout by reporting RUNNING
-                // immediately, so no per-service timeout tweak is needed.
                 os.Remove(tmpBat)
                 os.Remove(tmpVbs)
                 os.Remove(donePath)
+                if !done {
+                        return fmt.Errorf("installation did not complete within 30s — the customer may have clicked No on the UAC prompt, or antivirus blocked the install")
+                }
                 return nil
         }
 

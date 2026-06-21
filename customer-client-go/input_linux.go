@@ -20,6 +20,11 @@ import (
 )
 
 var xDisplay *C.Display
+var (
+        cachedScreenW int
+        cachedScreenH int
+        screenCached  bool
+)
 
 func initX11() error {
         if xDisplay != nil {
@@ -33,12 +38,30 @@ func initX11() error {
         return nil
 }
 
-// Display size for relative -> absolute coordinate conversion
+// Display size for relative -> absolute coordinate conversion.
+// Uses XDisplayWidth/Height (cheap X11 round-trip) instead of capturing the
+// full screen (multi-MB allocation). Cached after first call.
 func displaySize() (int, int) {
+        if screenCached {
+                return cachedScreenW, cachedScreenH
+        }
+        if err := initX11(); err == nil && xDisplay != nil {
+                screen := C.XDefaultScreen(xDisplay)
+                cachedScreenW = int(C.XDisplayWidth(xDisplay, screen))
+                cachedScreenH = int(C.XDisplayHeight(xDisplay, screen))
+                if cachedScreenW > 0 && cachedScreenH > 0 {
+                        screenCached = true
+                        return cachedScreenW, cachedScreenH
+                }
+        }
+        // Fallback to kbinani only once (still expensive, but only on first call)
         if n := screenshot.NumActiveDisplays(); n > 0 {
                 if img, err := screenshot.CaptureDisplay(0); err == nil {
                         b := img.Bounds()
-                        return b.Dx(), b.Dy()
+                        cachedScreenW = b.Dx()
+                        cachedScreenH = b.Dy()
+                        screenCached = true
+                        return cachedScreenW, cachedScreenH
                 }
         }
         return 1920, 1080
@@ -249,15 +272,16 @@ func keyPress(code string) {
 }
 
 func keyType(text string) {
+        // Ensure X11 is initialized before using xDisplay — without this,
+        // xDisplay is nil and every X11 call below crashes with SIGSEGV.
+        if err := initX11(); err != nil {
+                return
+        }
         for _, r := range text {
                 sym := C.KeySym(r)
                 keycode := C.XKeysymToKeycode(xDisplay, C.ulong(sym))
                 if keycode == 0 {
                         continue
-                }
-                shift := unicode.IsUpper(r) || (r >= '!' && r <= '&') || r == '(' || r == ')' || r == '*' || r == '+'
-                if shift {
-                        keyDown("ShiftLeft")
                 }
                 root := C.XDefaultRootWindow(xDisplay)
                 var down C.XKeyEvent
@@ -278,9 +302,6 @@ func keyType(text string) {
                 up.time = C.CurrentTime
                 up.same_screen = 1
                 C.XSendEvent(xDisplay, root, 0, C.KeyReleaseMask, (*C.XEvent)(unsafe.Pointer(&up)))
-                if shift {
-                        keyUp("ShiftLeft")
-                }
         }
         C.XFlush(xDisplay)
 }

@@ -139,8 +139,14 @@ export function SessionView({
 
   // -------------------------------------------------------------------------
   // Connect to signaling server via plain WebSocket (browser technician side)
+  // Includes automatic reconnection with exponential backoff.
   // -------------------------------------------------------------------------
   useEffect(() => {
+    let ws: WebSocket | null = null
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+    let reconnectAttempts = 0
+    let intentionallyClosed = false
+
     // Build the WebSocket URL.
     // - Production (port 80/443 via reverse proxy): connect to the same
     //   origin — the proxy routes WS upgrades to the signaling server.
@@ -155,174 +161,195 @@ export function SessionView({
       // Production: same origin (reverse proxy handles WS routing)
       wsUrl = `${proto}//${window.location.host}/`
     }
-    const ws = new WebSocket(wsUrl)
-    ws.binaryType = 'arraybuffer'
-    wsRef.current = ws
 
-    ws.onopen = () => {
-      setConnected(true)
-      // Send join-room message to register
-      ws.send(JSON.stringify({
-        type: 'join-room',
-        roomCode,
-        role: 'technician',
-        name: displayName,
-      }))
-    }
+    const connect = () => {
+      ws = new WebSocket(wsUrl)
+      ws.binaryType = 'arraybuffer'
+      wsRef.current = ws
 
-    ws.onclose = () => setConnected(false)
-    ws.onerror = () => setConnected(false)
-
-    ws.onmessage = (event) => {
-      if (event.data instanceof ArrayBuffer) {
-        // Binary = JPEG screen frame
-        // Update the ref (no re-render) — the 1s interval will pick it up
-        lastFrameAtRef.current = Date.now()
-        drawFrameRef.current(event.data)
-        return
+      ws.onopen = () => {
+        reconnectAttempts = 0
+        setConnected(true)
+        // Send join-room message to register
+        ws!.send(JSON.stringify({
+          type: 'join-room',
+          roomCode,
+          role: 'technician',
+          name: displayName,
+        }))
       }
-      // Text = JSON control message
-      try {
-        const msg = JSON.parse(event.data)
-        switch (msg.type) {
-          case 'joined-room':
-            setPeers(msg.peers || [])
-            setCustomerConnected((msg.peers || []).some((p: Peer) => p.role === 'customer'))
-            break
-          case 'peer-joined':
-            setPeers((prev) => prev.some((p) => p.id === msg.id) ? prev : [...prev, msg])
-            if (msg.role === 'customer') {
-              setCustomerConnected(true)
-              toast.success(`${msg.name} connected`)
-              // Auto-grab system info when customer connects
-              setTimeout(() => sendSystemCommand({ type: 'get-sysinfo' }), 1000)
-              // Auto-list monitors
-              setTimeout(() => sendSystemCommand({ type: 'list-monitors' }), 1500)
+
+      ws.onclose = () => {
+        setConnected(false)
+        wsRef.current = null
+        if (intentionallyClosed) return
+        // Exponential backoff: 1s, 2s, 4s, 8s, max 15s
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 15000)
+        reconnectAttempts++
+        console.log(`[ws] disconnected, reconnecting in ${delay}ms...`)
+        reconnectTimer = setTimeout(connect, delay)
+      }
+
+      ws.onerror = () => {
+        // onclose will handle reconnection
+        setConnected(false)
+      }
+
+      ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+          // Binary = JPEG screen frame
+          // Update the ref (no re-render) — the 1s interval will pick it up
+          lastFrameAtRef.current = Date.now()
+          drawFrameRef.current(event.data)
+          return
+        }
+        // Text = JSON control message
+        try {
+          const msg = JSON.parse(event.data)
+          switch (msg.type) {
+            case 'joined-room':
+              setPeers(msg.peers || [])
+              setCustomerConnected((msg.peers || []).some((p: Peer) => p.role === 'customer'))
+              break
+            case 'peer-joined':
+              setPeers((prev) => prev.some((p) => p.id === msg.id) ? prev : [...prev, msg])
+              if (msg.role === 'customer') {
+                setCustomerConnected(true)
+                toast.success(`${msg.name} connected`)
+                // Auto-grab system info when customer connects
+                setTimeout(() => sendSystemCommand({ type: 'get-sysinfo' }), 1000)
+                // Auto-list monitors
+                setTimeout(() => sendSystemCommand({ type: 'list-monitors' }), 1500)
+              }
+              break
+            case 'peer-left':
+              setPeers((prev) => {
+                const next = prev.filter((p) => p.id !== msg.id)
+                setCustomerConnected(next.some((p) => p.role === 'customer'))
+                return next
+              })
+              break
+            case 'presence':
+              setPeers(msg.peers || [])
+              setCustomerConnected((msg.peers || []).some((p: Peer) => p.role === 'customer'))
+              break
+            case 'chat-message':
+              setChatMessages((prev) => [...prev, msg])
+              break
+            case 'annotation': {
+              const annotation: Annotation = {
+                id: Math.random().toString(36).slice(2),
+                x: msg.x,
+                y: msg.y,
+                label: msg.label,
+                createdAt: Date.now(),
+              }
+              setAnnotations((prev) => [...prev, annotation])
+              setTimeout(() => {
+                setAnnotations((prev) => prev.filter((x) => x.id !== annotation.id))
+              }, 4000)
+              break
             }
-            break
-          case 'peer-left':
-            setPeers((prev) => {
-              const next = prev.filter((p) => p.id !== msg.id)
-              setCustomerConnected(next.some((p) => p.role === 'customer'))
-              return next
-            })
-            break
-          case 'presence':
-            setPeers(msg.peers || [])
-            setCustomerConnected((msg.peers || []).some((p: Peer) => p.role === 'customer'))
-            break
-          case 'chat-message':
-            setChatMessages((prev) => [...prev, msg])
-            break
-          case 'annotation': {
-            const annotation: Annotation = {
-              id: Math.random().toString(36).slice(2),
-              x: msg.x,
-              y: msg.y,
-              label: msg.label,
-              createdAt: Date.now(),
-            }
-            setAnnotations((prev) => [...prev, annotation])
-            setTimeout(() => {
-              setAnnotations((prev) => prev.filter((x) => x.id !== annotation.id))
-            }, 4000)
-            break
-          }
-          case 'clear-annotations':
-            setAnnotations([])
-            break
-          case 'session-ended':
-            toast.info('Session ended')
-            onEnded?.()
-            break
-          case 'machine-specs':
-            setMachineSpecs({
-              os: msg.os,
-              hostname: msg.hostname,
-              cpu: msg.cpu,
-              ram: msg.ram,
-              screen: msg.screen,
-              arch: msg.arch,
-            })
-            break
-          // --- New feature handlers ---
-          case 'clipboard-data':
-            setClipboardHistory((prev) => [{
-              id: Math.random().toString(36).slice(2),
-              text: msg.text || '',
-              direction: 'in',
-              timestamp: new Date().toISOString(),
-            }, ...prev].slice(0, 20))
-            break
-          case 'command-output':
-            if (msg.final) {
-              // Final output — replace the '[running...]' entry with the real output
-              setCmdOutput((prev) => prev.map((c) =>
-                c.id === msg.id ? { ...c, output: msg.output || '' } : c
-              ))
-            } else {
-              // Initial '[running...]' — add as new entry
-              setCmdOutput((prev) => [...prev, {
-                id: msg.id || Math.random().toString(36).slice(2),
-                command: msg.command || '',
-                output: msg.output || '',
-              }])
-            }
-            break
-          case 'process-list':
-            setProcessList(msg.processes || [])
-            break
-          case 'monitor-list':
-            setMonitors(msg.monitors || [])
-            break
-          case 'sysinfo':
-            setExpandedSysInfo(msg.details || {})
-            break
-          case 'unattended-result':
-            if (msg.result === 'removed') {
-              toast.success('Unattended access removed from this machine.')
-            } else if (msg.result && !msg.result.startsWith('error')) {
-              toast.success('Unattended access installed! You can now reconnect anytime from the dashboard.')
-            } else {
-              toast.error('Failed: ' + (msg.result || 'unknown error'))
-            }
-            break
-          case 'elevate-result':
-            if (msg.result && (msg.result.startsWith('error') || msg.result.startsWith('Error'))) {
-              toast.error('Elevation failed: ' + msg.result)
-            } else {
-              toast.success('Customer is restarting with admin privileges. They will reconnect shortly.')
-            }
-            break
-          case 'event-logs':
-            // Either the initial "[loading...]" ack or the final output.
-            // If it's the final (no pending flag), replace the pending entry;
-            // otherwise add a new entry.
-            setEventLogs((prev) => {
-              const existing = prev.find((e) => e.id === msg.id)
-              if (existing) {
-                return prev.map((e) => e.id === msg.id ? {
-                  ...e,
+            case 'clear-annotations':
+              setAnnotations([])
+              break
+            case 'session-ended':
+              toast.info('Session ended')
+              onEnded?.()
+              break
+            case 'machine-specs':
+              setMachineSpecs({
+                os: msg.os,
+                hostname: msg.hostname,
+                cpu: msg.cpu,
+                ram: msg.ram,
+                screen: msg.screen,
+                arch: msg.arch,
+              })
+              break
+            // --- New feature handlers ---
+            case 'clipboard-data':
+              setClipboardHistory((prev) => [{
+                id: Math.random().toString(36).slice(2),
+                text: msg.text || '',
+                direction: 'in' as const,
+                timestamp: new Date().toISOString(),
+              }, ...prev].slice(0, 20))
+              break
+            case 'command-output':
+              if (msg.final) {
+                // Final output — replace the '[running...]' entry with the real output
+                setCmdOutput((prev) => prev.map((c) =>
+                  c.id === msg.id ? { ...c, output: msg.output || '' } : c
+                ))
+              } else {
+                // Initial '[running...]' — add as new entry
+                setCmdOutput((prev) => [...prev, {
+                  id: msg.id || Math.random().toString(36).slice(2),
+                  command: msg.command || '',
+                  output: msg.output || '',
+                }])
+              }
+              break
+            case 'process-list':
+              setProcessList(msg.processes || [])
+              break
+            case 'monitor-list':
+              setMonitors(msg.monitors || [])
+              break
+            case 'sysinfo':
+              setExpandedSysInfo(msg.details || {})
+              break
+            case 'unattended-result':
+              if (msg.result === 'removed') {
+                toast.success('Unattended access removed from this machine.')
+              } else if (msg.result && !msg.result.startsWith('error')) {
+                toast.success('Unattended access installed! You can now reconnect anytime from the dashboard.')
+              } else {
+                toast.error('Failed: ' + (msg.result || 'unknown error'))
+              }
+              break
+            case 'elevate-result':
+              if (msg.result && (msg.result.startsWith('error') || msg.result.startsWith('Error'))) {
+                toast.error('Elevation failed: ' + msg.result)
+              } else {
+                toast.success('Customer is restarting with admin privileges. They will reconnect shortly.')
+              }
+              break
+            case 'event-logs':
+              // Either the initial "[loading...]" ack or the final output.
+              // If it's the final (no pending flag), replace the pending entry;
+              // otherwise add a new entry.
+              setEventLogs((prev) => {
+                const existing = prev.find((e) => e.id === msg.id)
+                if (existing) {
+                  return prev.map((e) => e.id === msg.id ? {
+                    ...e,
+                    output: msg.output || '',
+                    pending: !!msg.pending,
+                  } : e)
+                }
+                return [{
+                  id: msg.id || Math.random().toString(36).slice(2),
+                  logName: msg.logName || 'System',
                   output: msg.output || '',
                   pending: !!msg.pending,
-                } : e)
-              }
-              return [{
-                id: msg.id || Math.random().toString(36).slice(2),
-                logName: msg.logName || 'System',
-                output: msg.output || '',
-                pending: !!msg.pending,
-              }, ...prev].slice(0, 20)
-            })
-            break
+                }, ...prev].slice(0, 20)
+              })
+              break
+          }
+        } catch (err) {
+          console.error('ws message parse error', err)
         }
-      } catch (err) {
-        console.error('ws message parse error', err)
       }
     }
 
+    connect()
+
     return () => {
-      ws.close()
+      intentionallyClosed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      if (ws) ws.close()
       wsRef.current = null
     }
   }, [roomCode, displayName])
@@ -336,17 +363,22 @@ export function SessionView({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
+    let bitmap: ImageBitmap | null = null
     try {
       const blob = new Blob([buffer], { type: 'image/jpeg' })
-      const bitmap = await createImageBitmap(blob)
+      bitmap = await createImageBitmap(blob)
       if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
         canvas.width = bitmap.width
         canvas.height = bitmap.height
       }
       ctx.drawImage(bitmap, 0, 0)
-      bitmap.close()
     } catch (err) {
       console.error('drawFrame error', err)
+    } finally {
+      // Always close the bitmap to avoid GPU memory leaks, even on error.
+      if (bitmap) {
+        try { bitmap.close() } catch {}
+      }
     }
   }, [])
 
@@ -427,7 +459,7 @@ export function SessionView({
   const sendInput = useCallback((event: Record<string, any>): boolean => {
     if (!wsRef.current) return false
     wsRef.current.send(JSON.stringify({ type: 'input-event', payload: event }))
-    lastInputSentRef.current = performance.now()
+    lastInputSentRef.current = Date.now()
     return true
   }, [])
 
@@ -572,7 +604,11 @@ export function SessionView({
   const handleControlMouseDown = useCallback((e: React.MouseEvent) => {
     if (!controlMode) return
     e.preventDefault()
-  }, [controlMode])
+    const coords = getRelativeCoords(e)
+    if (!coords) return
+    const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
+    sendInput({ type: 'mouse_down', x: coords.x, y: coords.y, button })
+  }, [controlMode, getRelativeCoords, sendInput])
 
   const handleControlMouseUp = useCallback((e: React.MouseEvent) => {
     if (!controlMode) return
@@ -580,8 +616,7 @@ export function SessionView({
     const coords = getRelativeCoords(e)
     if (!coords) return
     const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-    // Send a single click on mouseup (not separate down + up)
-    sendInput({ type: 'mouse_click', x: coords.x, y: coords.y, button })
+    sendInput({ type: 'mouse_up', x: coords.x, y: coords.y, button })
   }, [controlMode, getRelativeCoords, sendInput])
 
   const handleControlWheel = useCallback((e: React.WheelEvent) => {
@@ -625,19 +660,25 @@ export function SessionView({
     return () => {
       window.removeEventListener('keydown', onKeyDown, { capture: true } as any)
       window.removeEventListener('keyup', onKeyUp, { capture: true } as any)
+      // Send keyup for any keys that are still held down when control mode ends,
+      // so the customer's OS doesn't think the key is stuck.
+      pressedKeysRef.current.forEach((code) => {
+        sendInput({ type: 'key_up', key: code })
+      })
       pressedKeysRef.current.clear()
     }
   }, [controlMode, sendInput])
 
-  const handleControlClick = useCallback((e: React.MouseEvent) => {
-    if (!controlMode) return
-    e.preventDefault()
-    e.stopPropagation()
-    const coords = getRelativeCoords(e)
-    if (!coords) return
-    const button = e.button === 2 ? 'right' : e.button === 1 ? 'middle' : 'left'
-    sendInput({ type: 'mouse_click', x: coords.x, y: coords.y, button })
-  }, [controlMode, getRelativeCoords, sendInput])
+  // Clear pressed keys when the customer disconnects (sends keyup for all
+  // held keys so the customer's OS doesn't think keys are stuck).
+  useEffect(() => {
+    if (customerConnected) return
+    if (pressedKeysRef.current.size === 0) return
+    pressedKeysRef.current.forEach((code) => {
+      sendInput({ type: 'key_up', key: code })
+    })
+    pressedKeysRef.current.clear()
+  }, [customerConnected, sendInput])
 
   const clearAnnotations = () => {
     setAnnotations([])
@@ -790,10 +831,7 @@ export function SessionView({
             className={`relative flex-1 bg-black flex items-center justify-center ${
               showAnnotationMode && !controlMode ? 'cursor-crosshair' : ''
             } ${controlMode ? 'cursor-pointer' : ''}`}
-            onClick={(e) => {
-              if (controlMode) handleControlClick(e)
-              else handleStageClick(e)
-            }}
+            onClick={controlMode ? undefined : (e) => handleStageClick(e)}
             onMouseMove={controlMode ? handleControlMouseMove : undefined}
             onMouseDown={controlMode ? handleControlMouseDown : undefined}
             onMouseUp={controlMode ? handleControlMouseUp : undefined}

@@ -19,12 +19,16 @@ fi
 # Push the Prisma schema (creates tables if they don't exist).
 # Using db push instead of migrate deploy because we don't ship migration
 # files — the schema is the source of truth. --skip-generate because the
-# client is already generated at build time. --accept-data-loss to allow
-# schema changes that drop columns (acceptable for this app's data).
-# (Hurdle #3 & #4: use npx prisma, not hardcoded node path)
+# client is already generated at build time.
+# NOTE: We do NOT use --accept-data-loss. If the schema changed in a way
+# that would drop columns/data, the push will fail safely and the container
+# will start with the OLD schema (better than silently losing data).
+# To apply breaking schema changes, manually run prisma db push --accept-data-loss.
 echo "[entrypoint] Running prisma db push..."
-npx prisma db push --skip-generate --accept-data-loss 2>&1 || {
+npx prisma db push --skip-generate 2>&1 || {
   echo "[entrypoint] WARNING: prisma db push failed. Continuing anyway."
+  echo "[entrypoint] If you changed the schema, you may need to run:"
+  echo "[entrypoint]   docker compose exec nextjs npx prisma db push --accept-data-loss"
 }
 
 echo "[entrypoint] Starting Next.js on port $PORT..."

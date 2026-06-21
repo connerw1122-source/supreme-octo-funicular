@@ -40,6 +40,15 @@ function relayToRoom(code: string, message: string | Buffer, excludeId?: string)
   })
 }
 
+// cleanupRoom removes the room from peersByRoom if it's empty.
+// Called after a peer leaves to prevent unbounded memory growth.
+function cleanupRoom(code: string) {
+  const room = peersByRoom.get(code)
+  if (room && room.size === 0) {
+    peersByRoom.delete(code)
+  }
+}
+
 function joinRoom(ws: any, roomCode: string, role: 'technician' | 'customer', name: string) {
   const code = roomCode.toUpperCase().trim()
   const d = ws.data as WsData
@@ -65,8 +74,8 @@ function joinRoom(ws: any, roomCode: string, role: 'technician' | 'customer', na
 }
 
 const server = Bun.serve({
-  port: 3003,
-  hostname: '0.0.0.0',
+  port: Number(process.env.PORT) || 3003,
+  hostname: process.env.HOSTNAME || '0.0.0.0',
   fetch(req, srv) {
     const code = (req.headers.get('x-marqueeit-code') || '').toUpperCase().trim()
     const name = req.headers.get('x-marqueeit-name') || ''
@@ -173,6 +182,8 @@ const server = Bun.serve({
           getRoom(d.roomCode).delete(d.peerId)
           relayToRoom(d.roomCode, JSON.stringify({ type: 'peer-left', id: d.peerId, name: d.name }))
           broadcastPresence(d.roomCode)
+          // Clean up empty rooms to prevent unbounded memory growth
+          cleanupRoom(d.roomCode)
           console.log(`[ws] ${d.name} left room ${d.roomCode}`)
         }
       } catch (err) {

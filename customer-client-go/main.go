@@ -363,6 +363,7 @@ func (c *Client) shutdown() {
 func (c *Client) Run(ctx context.Context) error {
         c.ctx, c.cancel = context.WithCancel(ctx)
         if err := c.Connect(); err != nil {
+                c.cancel() // prevent context leak on connect failure
                 return err
         }
         <-c.ctx.Done()
