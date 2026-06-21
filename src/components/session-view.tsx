@@ -113,6 +113,7 @@ export function SessionView({
   const [inputLocked, setInputLocked] = useState(false)
   const [screenLocked, setScreenLocked] = useState(false)
   const [expandedSysInfo, setExpandedSysInfo] = useState<Record<string, any> | null>(null)
+  const [uacSecureDesktopEnabled, setUacSecureDesktopEnabled] = useState<boolean | null>(null) // null = unknown
   // --- Event Viewer state ---
   const [eventLogName, setEventLogName] = useState<'System' | 'Application' | 'Security' | 'Setup'>('System')
   const [eventLogs, setEventLogs] = useState<{ id: string; logName: string; output: string; pending?: boolean }[]>([])
@@ -226,11 +227,18 @@ export function SessionView({
                 setCurrentMonitorIdx(0)
                 setQualityLevel(55)
                 setFpsLevel(30)
+                setUacSecureDesktopEnabled(null) // unknown — will be queried
+                setExpandedSysInfo(null) // clear old sysinfo from previous session
+                setCmdOutput([]) // clear old command output
+                setProcessList([]) // clear old process list
+                setEventLogs([]) // clear old event logs
                 pressedKeysRef.current.clear()
                 // Auto-grab system info when customer connects
                 setTimeout(() => sendSystemCommand({ type: 'get-sysinfo' }), 1000)
                 // Auto-list monitors
                 setTimeout(() => sendSystemCommand({ type: 'list-monitors' }), 1500)
+                // Query UAC secure desktop status
+                setTimeout(() => sendSystemCommand({ type: 'get-uac-secure-desktop' }), 2000)
               }
               break
             case 'peer-left':
@@ -329,8 +337,9 @@ export function SessionView({
               break
             case 'uac-secure-desktop-result':
               if (msg.result === 'success') {
+                setUacSecureDesktopEnabled(msg.enabled === true)
                 if (msg.enabled === false) {
-                  toast.success('UAC Secure Desktop DISABLED. You can now interact with UAC prompts. Click the same button again to re-enable.')
+                  toast.success('UAC Secure Desktop DISABLED. You can now interact with UAC prompts.')
                 } else {
                   toast.success('UAC Secure Desktop ENABLED. Default security restored.')
                 }
@@ -339,7 +348,7 @@ export function SessionView({
               }
               break
             case 'uac-secure-desktop-status':
-              // Could update a UI indicator if we wanted
+              setUacSecureDesktopEnabled(msg.enabled === true)
               break
             case 'event-logs':
               // Either the initial "[loading...]" ack or the final output.
@@ -552,16 +561,14 @@ export function SessionView({
   }, [inputLocked, sendSystemCommand])
 
   const toggleScreenLock = useCallback(() => {
-    const newLock = !screenLocked
-    if (newLock) {
+    if (!screenLocked) {
       // Locking — this works (calls LockWorkStation)
       sendSystemCommand({ type: 'lock-screen' })
       setScreenLocked(true)
-      toast.info('Locking customer screen...')
+      toast.info('Locking customer screen... The customer will need to enter their password/PIN to unlock.')
     } else {
-      // Unlocking — Windows doesn't allow remote unlock (security).
-      // The customer must enter their password/PIN manually.
-      toast.warning('Cannot unlock the screen remotely — ask the customer to log back in.')
+      // Already locked — can't unlock remotely (Windows security)
+      toast.warning('Cannot unlock the screen remotely. The customer must enter their password/PIN at their keyboard.')
     }
   }, [screenLocked, sendSystemCommand])
 
@@ -599,49 +606,38 @@ export function SessionView({
   }, [sendSystemCommand])
 
   const toggleUACSecureDesktop = useCallback(() => {
-    if (!confirm(
-      'Disable UAC Secure Desktop?\n\n' +
-      'When disabled, UAC prompts will appear on the normal desktop instead of ' +
-      'the isolated secure desktop. This allows you to see and interact with ' +
-      'UAC prompts during remote control.\n\n' +
-      'The customer will see a UAC prompt and needs to click YES.\n\n' +
-      'Note: This slightly reduces security (any process could click UAC prompts). ' +
-      'Re-enable after the session to restore the default behavior.'
-    )) return
-    toast.info('Disabling UAC Secure Desktop — customer will see a UAC prompt...')
-    sendSystemCommand({ type: 'set-uac-secure-desktop', enabled: false })
-  }, [sendSystemCommand])
-
-  const enableUACSecureDesktop = useCallback(() => {
-    if (!confirm('Re-enable UAC Secure Desktop? This restores the default Windows security behavior.')) return
-    toast.info('Enabling UAC Secure Desktop...')
-    sendSystemCommand({ type: 'set-uac-secure-desktop', enabled: true })
-  }, [sendSystemCommand])
+    const currentState = uacSecureDesktopEnabled
+    if (currentState === null) {
+      // Unknown state — query first, then the user can click again
+      toast.info('Checking UAC Secure Desktop status...')
+      sendSystemCommand({ type: 'get-uac-secure-desktop' })
+      return
+    }
+    const newState = !currentState
+    if (newState) {
+      // Re-enabling (restoring default security)
+      if (!confirm('Re-enable UAC Secure Desktop? This restores the default Windows security behavior.')) return
+      toast.info('Enabling UAC Secure Desktop...')
+    } else {
+      // Disabling (allows UAC interaction)
+      if (!confirm(
+        'Disable UAC Secure Desktop?\n\n' +
+        'When disabled, UAC prompts will appear on the normal desktop instead of ' +
+        'the isolated secure desktop. This allows you to see and interact with ' +
+        'UAC prompts during remote control.\n\n' +
+        'The customer will see a UAC prompt and needs to click YES.\n\n' +
+        'Note: This slightly reduces security (any process could click UAC prompts). ' +
+        'Re-enable after the session to restore the default behavior.'
+      )) return
+      toast.info('Disabling UAC Secure Desktop — customer will see a UAC prompt...')
+    }
+    sendSystemCommand({ type: 'set-uac-secure-desktop', enabled: newState })
+  }, [sendSystemCommand, uacSecureDesktopEnabled])
 
   const fetchEventLogs = useCallback((logName: string, maxEvents: number = 50) => {
     const id = Math.random().toString(36).slice(2)
     sendSystemCommand({ type: 'get-event-logs', logName, maxEvents, id })
   }, [sendSystemCommand])
-
-  const handleStageClick = (e: React.MouseEvent) => {
-    if (controlMode) return
-    if (!showAnnotationMode) return
-    const coords = getRelativeCoords(e)
-    if (!coords) return
-    const a: Annotation = {
-      id: Math.random().toString(36).slice(2),
-      x: coords.x,
-      y: coords.y,
-      label: 'Click here',
-      createdAt: Date.now(),
-    }
-    setAnnotations((prev) => [...prev, a])
-    // Send the annotation with the correct relative coordinates
-    wsRef.current?.send(JSON.stringify({ type: 'annotation', x: a.x, y: a.y, label: a.label }))
-    setTimeout(() => {
-      setAnnotations((prev) => prev.filter((x) => x.id !== a.id))
-    }, 6000)
-  }
 
   const handleControlMouseMove = useCallback((e: React.MouseEvent) => {
     if (!controlMode) return
@@ -769,8 +765,9 @@ export function SessionView({
   // the inline style on every render, which contributed to the flashing.
   const canvasStyle = {
     imageRendering: 'auto' as const,
-    maxWidth: '100%',
-    maxHeight: '100%',
+    width: '100%',
+    height: '100%',
+    objectFit: 'contain' as const,
     border: '2px solid #FFC425',
     borderRadius: '4px',
     boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
@@ -1008,11 +1005,29 @@ export function SessionView({
               <Button size="sm" variant="ghost" className="h-7 px-2 text-amber-400 hover:text-amber-300" onClick={elevateSession} title="Restart with admin privileges (UAC)">
                 <Shield className="w-3.5 h-3.5" />
               </Button>
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-purple-400 hover:text-purple-300" onClick={toggleUACSecureDesktop} title="Disable UAC Secure Desktop (allows interacting with UAC prompts)">
-                <ShieldAlert className="w-3.5 h-3.5" />
-              </Button>
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-green-400 hover:text-green-300" onClick={enableUACSecureDesktop} title="Re-enable UAC Secure Desktop (restores default security)">
-                <ShieldCheck className="w-3.5 h-3.5" />
+              <Button
+                size="sm"
+                variant="ghost"
+                className={`h-7 px-2 ${
+                  uacSecureDesktopEnabled === false
+                    ? 'text-green-400 hover:text-green-300' // green = UAC prompts visible (disabled secure desktop)
+                    : uacSecureDesktopEnabled === true
+                    ? 'text-purple-400 hover:text-purple-300' // purple = secure desktop ON (default)
+                    : 'text-slate-400 hover:text-slate-300' // gray = unknown
+                }`}
+                onClick={toggleUACSecureDesktop}
+                title={
+                  uacSecureDesktopEnabled === false
+                    ? 'UAC Secure Desktop is DISABLED (you can interact with UAC prompts). Click to re-enable.'
+                    : uacSecureDesktopEnabled === true
+                    ? 'UAC Secure Desktop is ENABLED (cannot interact with UAC prompts). Click to disable.'
+                    : 'UAC Secure Desktop status unknown. Click to query.'
+                }
+              >
+                {uacSecureDesktopEnabled === false
+                  ? <ShieldCheck className="w-3.5 h-3.5" />
+                  : <ShieldAlert className="w-3.5 h-3.5" />
+                }
               </Button>
               <Button size="sm" variant="ghost" className="h-7 px-2 text-emerald-400 hover:text-emerald-300" onClick={installUnattended} title="Setup unattended access on this machine">
                 <MonitorSmartphone className="w-3.5 h-3.5" />

@@ -249,15 +249,16 @@ func HandleSystemCommand(msg map[string]interface{}) {
                                 value = 0
                         }
                         // PowerShell command to set the registry value AND verify it.
-                        // We read back the value after setting to confirm it actually
-                        // took effect — PowerShell doesn't always error on access denied.
+                        // Uses simple commands (no try/catch or $_) to avoid quoting
+                        // issues when embedded in a bat file.
                         psCmd := fmt.Sprintf(
-                                `try { Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord -ErrorAction Stop; $v = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop').PromptOnSecureDesktop; if ($v -eq %d) { 'SUCCESS' } else { 'VERIFY_FAILED:' + $v } } catch { 'ERROR:' + $_.Exception.Message }`,
-                                value, value)
+                                `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord -ErrorAction SilentlyContinue; (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -ErrorAction SilentlyContinue).PromptOnSecureDesktop`,
+                                value)
                         // Try direct first (works if already admin or SYSTEM)
                         out, err := winExecPowerShellHidden(psCmd)
                         out = strings.TrimSpace(out)
-                        if err == nil && strings.HasPrefix(out, "SUCCESS") {
+                        // If we got back the value we set, it worked
+                        if err == nil && out == fmt.Sprintf("%d", value) {
                                 status := "enabled"
                                 if !enabled {
                                         status = "disabled"
@@ -311,7 +312,9 @@ WshShell.Run "%s", 0, True
                         os.Remove(donePath)
                         os.Remove(errPath)
                         errStr := strings.TrimSpace(string(errContent))
-                        if done && (strings.Contains(errStr, "SUCCESS") || !strings.Contains(errStr, "ERROR")) {
+                        // The PowerShell command outputs the registry value on success.
+                        // Check if the output contains the value we set (0 or 1).
+                        if done && strings.Contains(errStr, fmt.Sprintf("%d", value)) {
                                 status := "enabled"
                                 if !enabled {
                                         status = "disabled"

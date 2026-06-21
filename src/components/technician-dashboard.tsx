@@ -399,8 +399,8 @@ export function TechnicianDashboard({
                   <CardTitle>Support Sessions</CardTitle>
                   <CardDescription>Create a session and share the code with your customer.</CardDescription>
                 </div>
-                <Button variant="ghost" size="sm" onClick={fetchSessions}>
-                  <RefreshCw className="w-4 h-4 mr-1" />
+                <Button variant="ghost" size="sm" onClick={() => { setLoading(true); fetchSessions() }}>
+                  <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
                   Refresh
                 </Button>
               </CardHeader>
