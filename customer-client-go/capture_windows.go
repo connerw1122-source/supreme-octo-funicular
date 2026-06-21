@@ -218,7 +218,7 @@ func getFallbackFrame(reason string) (*image.RGBA, error) {
                 dup.Pix = make([]byte, len(lastGoodFrame.Pix))
                 copy(dup.Pix, lastGoodFrame.Pix)
                 lastGoodFrameMu.Unlock()
-                return dup, nil
+                return &dup, nil
         }
         lastGoodFrameMu.Unlock()
         // No cached frame — try kbinani as a last resort.
