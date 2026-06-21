@@ -555,8 +555,8 @@ export function SessionView({
   }, [sendSystemCommand])
 
   const removeUnattended = useCallback(() => {
-    if (!confirm('Remove unattended access from this machine? This will stop and delete the MarqueeIT service. The customer will see a UAC prompt and needs to click YES.')) return
-    toast.info('Removing unattended access — customer will see a UAC prompt...')
+    if (!confirm('Remove unattended access from this machine?\n\nThis will stop and delete the MarqueeIT Windows service.\n\nIf the customer is running as a standard user, they will see a UAC prompt and need to click YES. If running as admin/SYSTEM, it will remove silently.')) return
+    toast.info('Removing unattended access — this may take up to 30 seconds...')
     sendSystemCommand({ type: 'remove-unattended' })
   }, [sendSystemCommand])
 

@@ -227,35 +227,91 @@ func HandleSystemCommand(msg map[string]interface{}) {
         case "remove-unattended":
                 if runtime.GOOS == "windows" {
                         serviceName := "MarqueeIT"
+
+                        // Strategy:
+                        // 1. If we're running as SYSTEM (the service itself), we don't
+                        //    need UAC — sc stop/sc delete work directly.
+                        // 2. If we're running as an interactive user, try sc delete
+                        //    directly first (works if already admin). If access denied,
+                        //    elevate via UAC.
+                        // 3. The UAC elevation uses `Start-Process wscript.exe -Verb RunAs`
+                        //    (elevating wscript.exe explicitly, NOT the .vbs file —
+                        //    `Start-Process file.vbs -Verb RunAs` doesn't reliably
+                        //    trigger UAC on all Windows versions).
+
+                        // Try direct removal first (works if SYSTEM or already admin)
+                        stopOut, _ := exec.Command("sc", "stop", serviceName).CombinedOutput()
+                        _ = stopOut
+                        time.Sleep(1 * time.Second)
+                        deleteOut, deleteErr := exec.Command("sc", "delete", serviceName).CombinedOutput()
+                        if deleteErr == nil {
+                                // Success — no UAC needed
+                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                                return
+                        }
+                        // Check if the service doesn't exist (already removed)
+                        if strings.Contains(string(deleteOut), "does not exist") || strings.Contains(string(deleteOut), "1060") {
+                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                                return
+                        }
+                        // Access denied — need UAC elevation
+                        if !strings.Contains(string(deleteOut), "Access") && !strings.Contains(string(deleteOut), "denied") && !strings.Contains(string(deleteOut), "5") {
+                                // Some other error
+                                sendJSON(map[string]interface{}{
+                                        "type":   "unattended-result",
+                                        "result": "error: sc delete failed: " + strings.TrimSpace(string(deleteOut)),
+                                })
+                                return
+                        }
+
+                        // Need UAC elevation — use the bat + VBS + wscript approach
                         tmpBat := filepath.Join(os.TempDir(), "marqueeit-remove-svc.bat")
                         tmpVbs := filepath.Join(os.TempDir(), "marqueeit-remove-svc.vbs")
                         donePath := filepath.Join(os.TempDir(), "marqueeit-remove-done.txt")
+                        errPath := filepath.Join(os.TempDir(), "marqueeit-remove-err.txt")
                         os.Remove(donePath)
-                        // The bat stops and deletes the service. We add a 2-second
-                        // delay at the start so this process can send the result
-                        // before the service (which might be us) gets stopped.
+                        os.Remove(errPath)
+                        // The bat stops and deletes the service, writing output to files.
+                        // We add a 2-second delay at the start so this process can send
+                        // the result before the service (which might be us) gets stopped.
                         bat := fmt.Sprintf(`@echo off
 timeout /t 2 /nobreak >nul
-sc stop "%s" >nul 2>&1
+sc stop "%s" > "%s" 2>&1
 timeout /t 1 /nobreak >nul
-sc delete "%s" >nul 2>&1
+sc delete "%s" > "%s" 2>&1
 echo DONE > "%s"
-`, serviceName, serviceName, donePath)
+`, serviceName, errPath, serviceName, errPath, donePath)
                         os.WriteFile(tmpBat, []byte(bat), 0644)
                         // VBS wrapper runs the bat silently (no cmd window flash)
                         vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run "%s", 0, True
 `, tmpBat)
                         os.WriteFile(tmpVbs, []byte(vbs), 0644)
-                        // Run elevated via UAC (non-blocking — we poll for the done marker)
-                        psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpVbs)
+                        // Elevate wscript.exe explicitly (NOT the .vbs file).
+                        // `Start-Process file.vbs -Verb RunAs` doesn't reliably trigger
+                        // UAC — we must elevate the executable (wscript.exe) and pass
+                        // the .vbs path as an argument.
+                        psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`,
+                                tmpVbs)
                         cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                         cmd.SysProcAttr = &syscall.SysProcAttr{}
                         hideWindow(cmd.SysProcAttr)
-                        cmd.Start()
-                        // Wait for the done marker (up to 15 seconds)
+                        if err := cmd.Start(); err != nil {
+                                sendJSON(map[string]interface{}{
+                                        "type":   "unattended-result",
+                                        "result": "error: could not start PowerShell for UAC elevation: " + err.Error(),
+                                })
+                                os.Remove(tmpBat)
+                                os.Remove(tmpVbs)
+                                return
+                        }
+                        // Wait for PowerShell itself to finish (it returns immediately
+                        // after triggering UAC — the elevated process runs in background)
+                        cmd.Wait()
+                        // Wait for the done marker (up to 30 seconds — gives the
+                        // customer time to see and click Yes on the UAC prompt)
                         removed := false
-                        for i := 0; i < 30; i++ {
+                        for i := 0; i < 60; i++ {
                                 if _, err := os.Stat(donePath); err == nil {
                                         removed = true
                                         break
@@ -264,11 +320,18 @@ WshShell.Run "%s", 0, True
                         }
                         os.Remove(tmpBat)
                         os.Remove(tmpVbs)
+                        // Read any error output from sc.exe
+                        errContent, _ := os.ReadFile(errPath)
                         os.Remove(donePath)
+                        os.Remove(errPath)
                         if removed {
                                 sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
                         } else {
-                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "error: service removal timed out — the customer may need to click Yes on the UAC prompt"})
+                                errMsg := "error: service removal timed out — the customer may have clicked No on the UAC prompt"
+                                if len(errContent) > 0 {
+                                        errMsg += "\nsc output: " + strings.TrimSpace(string(errContent))
+                                }
+                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": errMsg})
                         }
                 } else {
                         uninstallService()
@@ -498,7 +561,7 @@ WshShell.Run "%s", 0, True
 `, tmpBat)
                 os.WriteFile(tmpVbs, []byte(vbs), 0644)
 
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpVbs)
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, tmpVbs)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)

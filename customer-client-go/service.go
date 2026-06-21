@@ -114,12 +114,20 @@ WshShell.Run "%s", 0, True
 `, tmpBat)
                 os.WriteFile(tmpVbs, []byte(vbs), 0644)
 
-                // Run elevated via PowerShell (no -Wait, we poll for done marker)
-                psCmd := fmt.Sprintf(`Start-Process -FilePath "%s" -Verb RunAs`, tmpVbs)
+                // Elevate wscript.exe explicitly (NOT the .vbs file).
+                // `Start-Process file.vbs -Verb RunAs` doesn't reliably trigger UAC
+                // on all Windows versions — we must elevate the executable and pass
+                // the .vbs path as an argument.
+                psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, tmpVbs)
                 cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
                 cmd.SysProcAttr = &syscall.SysProcAttr{}
                 hideWindow(cmd.SysProcAttr)
-                cmd.Start() // non-blocking
+                if err := cmd.Start(); err != nil {
+                        return fmt.Errorf("could not start PowerShell for UAC elevation: %w", err)
+                }
+                // Wait for PowerShell to finish (it returns immediately after
+                // triggering UAC — the elevated process runs in background)
+                cmd.Wait()
 
                 // Wait for the done marker (up to 30 seconds)
                 donePath := filepath.Join(os.TempDir(), "marqueeit-svc-done.txt")
