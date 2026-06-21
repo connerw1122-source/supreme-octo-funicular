@@ -57,6 +57,7 @@ interface Session {
   endedAt: string | null
   messageCount: number
   technician: { id: string; name: string } | null
+  unattendedMachineCode?: string | null
 }
 
 interface UnattendedMachine {
@@ -196,6 +197,32 @@ export function TechnicianDashboard({
       onJoinSession(session.id, session.code, session.title)
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to start session')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  // reconnectToMachine creates a new session for an unattended machine by code.
+  // Used when an old session has become invalid (e.g., after a reboot) and the
+  // technician wants to start fresh without going back to the Unattended tab.
+  const reconnectToMachine = async (machineCode: string, title: string) => {
+    setCreating(true)
+    try {
+      const res = await fetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `Unattended: ${title.replace(/^Unattended:\s*/, '')}`,
+          technicianName,
+          unattendedMachineCode: machineCode,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to start session')
+      const session = await res.json()
+      toast.success(`Reconnecting to ${machineCode}…`)
+      onJoinSession(session.id, session.code, session.title)
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to reconnect')
     } finally {
       setCreating(false)
     }
@@ -442,6 +469,19 @@ export function TechnicianDashboard({
                                     className="bg-[#1B3A6B] hover:bg-[#0F2A52]"
                                   >
                                     Join
+                                  </Button>
+                                )}
+                                {/* Reconnect button for ended/invalid unattended sessions */}
+                                {s.unattendedMachineCode && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => reconnectToMachine(s.unattendedMachineCode!, s.title)}
+                                    className="border-[#1B3A6B] text-[#1B3A6B] hover:bg-[#1B3A6B] hover:text-white"
+                                    title="Create a new session for this unattended machine"
+                                  >
+                                    <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                                    Reconnect
                                   </Button>
                                 )}
                                 <Button

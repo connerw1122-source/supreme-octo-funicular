@@ -314,7 +314,7 @@ func (c *Client) readLoop() {
                                 Label string  `json:"label"`
                         }
                         if err := json.Unmarshal(data, &annot); err == nil {
-                                showAnnotation(annot.X, annot.Y)
+                                showAnnotation(annot.X, annot.Y, annot.Label)
                         }
                 case "clear-annotations":
                         hideAnnotationOverlay()

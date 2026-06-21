@@ -22,33 +22,52 @@ static LRESULT CALLBACK AnnotWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        // Transparent background — just draw the ring + label
-        // Draw the outer ring (amber)
+        int w = rc.right - rc.left;
+        int h = rc.bottom - rc.top;
+
+        // Draw the ring (amber, centered in the window)
         HPEN hPen = CreatePen(PS_SOLID, 4, RGB(251, 191, 36));
-        HBRUSH hBrush = CreateSolidBrush(RGB(251, 191, 36));
-        // Need a transparent background brush for the fill
         HBRUSH hTrans = (HBRUSH)GetStockObject(HOLLOW_BRUSH);
         SelectObject(hdc, hPen);
         SelectObject(hdc, hTrans);
-        Ellipse(hdc, 4, 4, 52, 52);
-        // Inner fill (semi-transparent amber)
-        DeleteObject(hBrush);
-        hBrush = CreateSolidBrush(RGB(251, 191, 36));
-        // Can't do alpha without layered window + UpdateLayeredWindow, so just
-        // use a lighter solid color
-        DeleteObject(hBrush);
+        int ringSize = 48;
+        int cx = w / 2;
+        int cy = h / 2;
+        Ellipse(hdc, cx - ringSize/2, cy - ringSize/2, cx + ringSize/2, cy + ringSize/2);
         DeleteObject(hPen);
+
+        // Draw the label below the ring (white text on amber background)
+        if (strlen(g_annotLabel) > 0) {
+            HFONT hFont = CreateFont(16, 0, 0, 0, FW_BOLD, 0, 0, 0, 0, 0, 0, 0, 0, "Segoe UI");
+            HFONT hOld = SelectObject(hdc, hFont);
+            SetBkMode(hdc, TRANSPARENT);
+            // Measure the text
+            SIZE sz;
+            GetTextExtentPoint32A(hdc, g_annotLabel, strlen(g_annotLabel), &sz);
+            // Draw label background (amber rounded rect)
+            int labelY = cy + ringSize/2 + 4;
+            RECT labelBg = {cx - sz.cx/2 - 6, labelY, cx + sz.cx/2 + 6, labelY + sz.cy + 4};
+            HBRUSH hBgBrush = CreateSolidBrush(RGB(251, 191, 36));
+            FillRect(hdc, &labelBg, hBgBrush);
+            DeleteObject(hBgBrush);
+            // Draw text (dark blue)
+            SetTextColor(hdc, RGB(27, 58, 107));
+            TextOutA(hdc, cx - sz.cx/2, labelY + 2, g_annotLabel, strlen(g_annotLabel));
+            SelectObject(hdc, hOld);
+            DeleteObject(hFont);
+        }
+
         EndPaint(hwnd, &ps);
         return 0;
     }
     case WM_ERASEBKGND:
-        // Don't erase — prevents flickering
+        // Don't erase — prevents flickering. The layered window handles transparency.
         return 1;
     }
     return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
-// Create the annotation overlay window (a small 56x56 layered window)
+// Create the annotation overlay window (a 200x120 layered window to fit the label)
 static int createAnnotWindow() {
     if (g_annotHwnd) return 1;
 
@@ -63,27 +82,37 @@ static int createAnnotWindow() {
     g_annotHwnd = CreateWindowExA(
         WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT,
         "MarqueeITAnnot", "MarqueeIT Annot",
-        WS_POPUP, // not WS_VISIBLE — hidden until showAnnotation is called
-        0, 0, 56, 56,
+        WS_POPUP,
+        0, 0, 200, 120,
         NULL, NULL, GetModuleHandle(NULL), NULL);
 
     if (!g_annotHwnd) return 0;
 
-    // Use color key for transparency (amber background becomes transparent)
+    // Use color key for transparency: black (0,0,0) becomes transparent
     SetLayeredWindowAttributes(g_annotHwnd, RGB(0, 0, 0), 0, LWA_COLORKEY);
     return 1;
 }
 
-// Show the annotation at the given screen coordinates (0..1 range)
-static void showAnnotationAt(double relX, double relY) {
+// Show the annotation at the given screen coordinates (0..1 range) with a label
+static void showAnnotationAt(double relX, double relY, const char* label) {
     if (!g_annotHwnd) return;
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
-    int x = (int)(relX * screenW) - 28; // center on the point
-    int y = (int)(relY * screenH) - 28;
+    // Window is 200x120, center the ring on the click point
+    int winW = 200;
+    int winH = 120;
+    int x = (int)(relX * screenW) - winW / 2;
+    int y = (int)(relY * screenH) - winH / 2;
     if (x < 0) x = 0;
     if (y < 0) y = 0;
-    SetWindowPos(g_annotHwnd, HWND_TOPMOST, x, y, 56, 56, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+    // Set the label
+    if (label && strlen(label) > 0) {
+        strncpy(g_annotLabel, label, 127);
+        g_annotLabel[127] = 0;
+    } else {
+        g_annotLabel[0] = 0;
+    }
+    SetWindowPos(g_annotHwnd, HWND_TOPMOST, x, y, winW, winH, SWP_SHOWWINDOW | SWP_NOACTIVATE);
     g_annotVisible = 1;
     InvalidateRect(g_annotHwnd, NULL, FALSE);
 
@@ -96,6 +125,7 @@ static void hideAnnotation() {
     if (g_annotHwnd && g_annotVisible) {
         ShowWindow(g_annotHwnd, SW_HIDE);
         g_annotVisible = 0;
+        g_annotLabel[0] = 0;
     }
 }
 
@@ -118,6 +148,7 @@ import (
         "runtime"
         "sync"
         "time"
+        "unsafe"
 )
 
 var (
@@ -127,19 +158,14 @@ var (
 
 // showAnnotation displays a highlight ring at the given relative coordinates
 // on the customer's screen. Called when the technician clicks in highlight mode.
-func showAnnotation(relX, relY float64) {
+func showAnnotation(relX, relY float64, label string) {
         if runtime.GOOS != "windows" {
                 return
         }
         annotOnce.Do(func() {
-                // Create the window AND run the message loop on the SAME locked
-                // OS thread (Win32 windows are thread-affine). Signal via channel
-                // when the window is ready so the caller doesn't call
-                // showAnnotationAt before the window exists.
                 go func() {
                         runtime.LockOSThread()
                         C.createAnnotWindow()
-                        // Signal that the window is created
                         close(annotReady)
                         C.annotMessageLoop()
                 }()
@@ -150,7 +176,9 @@ func showAnnotation(relX, relY float64) {
         case <-time.After(2 * time.Second):
                 return
         }
-        C.showAnnotationAt(C.double(relX), C.double(relY))
+        cLabel := C.CString(label)
+        C.showAnnotationAt(C.double(relX), C.double(relY), cLabel)
+        C.free(unsafe.Pointer(cLabel))
 }
 
 // hideAnnotationOverlay hides any visible annotation.

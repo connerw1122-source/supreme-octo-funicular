@@ -102,7 +102,11 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   try {
     const sessions = await db.session.findMany({
-      include: { technician: true, _count: { select: { messages: true } } },
+      include: {
+        technician: true,
+        unattendedMachine: true,
+        _count: { select: { messages: true } },
+      },
       orderBy: { createdAt: 'desc' },
       take: 50,
     })
@@ -118,6 +122,7 @@ export async function GET() {
         endedAt: s.endedAt,
         messageCount: s._count.messages,
         technician: s.technician ? { id: s.technician.id, name: s.technician.name } : null,
+        unattendedMachineCode: s.unattendedMachine?.machineCode ?? null,
       })),
     })
   } catch (err: any) {

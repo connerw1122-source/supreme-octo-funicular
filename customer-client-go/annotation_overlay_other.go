@@ -3,5 +3,5 @@
 package main
 
 // Stubs for non-Windows — annotation overlay is Windows-only.
-func showAnnotation(relX, relY float64) {}
+func showAnnotation(relX, relY float64, label string) {}
 func hideAnnotationOverlay() {}
