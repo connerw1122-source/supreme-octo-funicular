@@ -248,83 +248,89 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         } else {
                                 value = 0
                         }
-                        // Use PowerShell to set the registry value (requires admin).
-                        // If we're already admin (e.g., elevated session or SYSTEM),
-                        // this works directly. If not, we need UAC elevation.
+                        // PowerShell command to set the registry value AND verify it.
+                        // We read back the value after setting to confirm it actually
+                        // took effect — PowerShell doesn't always error on access denied.
                         psCmd := fmt.Sprintf(
-                                `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord`,
-                                value)
-                        // Try direct first (works if already admin)
-                        _, err := winExecPowerShellHidden(psCmd)
-                        if err == nil {
+                                `try { Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord -ErrorAction Stop; $v = (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop').PromptOnSecureDesktop; if ($v -eq %d) { 'SUCCESS' } else { 'VERIFY_FAILED:' + $v } } catch { 'ERROR:' + $_.Exception.Message }`,
+                                value, value)
+                        // Try direct first (works if already admin or SYSTEM)
+                        out, err := winExecPowerShellHidden(psCmd)
+                        out = strings.TrimSpace(out)
+                        if err == nil && strings.HasPrefix(out, "SUCCESS") {
                                 status := "enabled"
                                 if !enabled {
                                         status = "disabled"
                                 }
                                 sendJSON(map[string]interface{}{
-                                        "type":   "uac-secure-desktop-result",
-                                        "result": "success",
+                                        "type":    "uac-secure-desktop-result",
+                                        "result":  "success",
                                         "enabled": enabled,
-                                        "status": status,
+                                        "status":  status,
                                 })
-                        } else {
-                                // Need UAC elevation
-                                tmpVbs := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.vbs")
-                                tmpBat := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.bat")
-                                donePath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-done.txt")
-                                errPath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-err.txt")
-                                os.Remove(donePath)
-                                os.Remove(errPath)
-                                bat := fmt.Sprintf(`@echo off
+                                return
+                        }
+                        // Either error or verification failed — need UAC elevation
+                        tmpVbs := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.vbs")
+                        tmpBat := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.bat")
+                        donePath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-done.txt")
+                        errPath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-err.txt")
+                        os.Remove(donePath)
+                        os.Remove(errPath)
+                        // Escape the PowerShell command for embedding in a bat file.
+                        // Double quotes inside the bat's powershell -Command "..." need
+                        // to be escaped as backslash-quote.
+                        escPsCmd := strings.ReplaceAll(psCmd, `"`, `\"`)
+                        bat := fmt.Sprintf(`@echo off
 powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "%s" > "%s" 2>&1
 echo DONE > "%s"
-`, psCmd, errPath, donePath)
-                                os.WriteFile(tmpBat, []byte(bat), 0644)
-                                vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+`, escPsCmd, errPath, donePath)
+                        os.WriteFile(tmpBat, []byte(bat), 0644)
+                        vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run "%s", 0, True
 `, tmpBat)
-                                os.WriteFile(tmpVbs, []byte(vbs), 0644)
-                                elevCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
-                                        fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, tmpVbs))
-                                elevCmd.SysProcAttr = &syscall.SysProcAttr{}
-                                hideWindow(elevCmd.SysProcAttr)
-                                elevCmd.Start()
-                                elevCmd.Wait()
-                                // Wait for done marker (up to 30s for UAC click)
-                                done := false
-                                for i := 0; i < 60; i++ {
-                                        if _, err := os.Stat(donePath); err == nil {
-                                                done = true
-                                                break
-                                        }
-                                        time.Sleep(500 * time.Millisecond)
+                        os.WriteFile(tmpVbs, []byte(vbs), 0644)
+                        elevCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+                                fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, tmpVbs))
+                        elevCmd.SysProcAttr = &syscall.SysProcAttr{}
+                        hideWindow(elevCmd.SysProcAttr)
+                        elevCmd.Start()
+                        elevCmd.Wait()
+                        // Wait for done marker (up to 30s for UAC click)
+                        done := false
+                        for i := 0; i < 60; i++ {
+                                if _, err := os.Stat(donePath); err == nil {
+                                        done = true
+                                        break
                                 }
-                                os.Remove(tmpBat)
-                                os.Remove(tmpVbs)
-                                errContent, _ := os.ReadFile(errPath)
-                                os.Remove(donePath)
-                                os.Remove(errPath)
-                                if done {
-                                        status := "enabled"
-                                        if !enabled {
-                                                status = "disabled"
-                                        }
-                                        sendJSON(map[string]interface{}{
-                                                "type":    "uac-secure-desktop-result",
-                                                "result":  "success",
-                                                "enabled": enabled,
-                                                "status":  status,
-                                        })
-                                } else {
-                                        errMsg := "UAC prompt was not approved (timed out)"
-                                        if len(errContent) > 0 {
-                                                errMsg += ": " + strings.TrimSpace(string(errContent))
-                                        }
-                                        sendJSON(map[string]interface{}{
-                                                "type":   "uac-secure-desktop-result",
-                                                "result": "error: " + errMsg,
-                                        })
+                                time.Sleep(500 * time.Millisecond)
+                        }
+                        os.Remove(tmpBat)
+                        os.Remove(tmpVbs)
+                        errContent, _ := os.ReadFile(errPath)
+                        os.Remove(donePath)
+                        os.Remove(errPath)
+                        errStr := strings.TrimSpace(string(errContent))
+                        if done && (strings.Contains(errStr, "SUCCESS") || !strings.Contains(errStr, "ERROR")) {
+                                status := "enabled"
+                                if !enabled {
+                                        status = "disabled"
                                 }
+                                sendJSON(map[string]interface{}{
+                                        "type":    "uac-secure-desktop-result",
+                                        "result":  "success",
+                                        "enabled": enabled,
+                                        "status":  status,
+                                })
+                        } else {
+                                errMsg := "UAC prompt was not approved or failed"
+                                if errStr != "" {
+                                        errMsg += ": " + errStr
+                                }
+                                sendJSON(map[string]interface{}{
+                                        "type":   "uac-secure-desktop-result",
+                                        "result": "error: " + errMsg,
+                                })
                         }
                 } else {
                         sendJSON(map[string]interface{}{
@@ -471,10 +477,13 @@ WshShell.Run "%s", 0, True
                 if serverURL == "" {
                         serverURL = globalClient.serverURL
                 }
-                // Register with server first
+                // Register with server first. Send the hostname so the server
+                // can detect if this machine is already registered (prevents
+                // duplicate codes when the technician clicks Install multiple times).
                 registerURL := fmt.Sprintf("%s/api/unattended", serverURL)
                 regBody, _ := json.Marshal(map[string]string{
                         "customerName": hostname(),
+                        "hostname":     hostname(),
                 })
                 resp, regErr := http.Post(registerURL, "application/json", bytes.NewReader(regBody))
                 machineCode := ""

@@ -21,18 +21,37 @@ async function generateUniqueCode(): Promise<string> {
 }
 
 // POST /api/unattended
-// Body: { customerName: string }
+// Body: { customerName: string, hostname?: string }
 // Technician generates a setup code to install on a customer's machine.
+// If a machine with the same hostname already exists, return the existing
+// code instead of creating a duplicate.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const customerName = (body?.customerName ?? '').toString().trim()
+    const hostname = (body?.hostname ?? '').toString().trim() || null
     if (!customerName) {
       return NextResponse.json({ error: 'customerName is required' }, { status: 400 })
     }
+    // Check if a machine with this hostname already exists (prevents duplicates
+    // when the technician clicks Install Unattended multiple times)
+    if (hostname) {
+      const existing = await db.unattendedMachine.findFirst({
+        where: { hostname },
+      })
+      if (existing) {
+        return NextResponse.json({
+          id: existing.id,
+          machineCode: existing.machineCode,
+          customerName: existing.customerName,
+          installedAt: existing.installedAt,
+          reused: true,
+        })
+      }
+    }
     const machineCode = await generateUniqueCode()
     const machine = await db.unattendedMachine.create({
-      data: { machineCode, customerName },
+      data: { machineCode, customerName, ...(hostname ? { hostname } : {}) },
     })
     return NextResponse.json({
       id: machine.id,

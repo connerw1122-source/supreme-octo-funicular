@@ -116,8 +116,12 @@ static void showAnnotationAt(double relX, double relY, const char* label) {
     g_annotVisible = 1;
     InvalidateRect(g_annotHwnd, NULL, FALSE);
 
-    // Set a timer to hide after 4 seconds
-    SetTimer(g_annotHwnd, 1, 4000, NULL);
+    // Kill any existing timer and set a new one for 6 seconds.
+    // Killing the old timer ensures we don't accumulate timers, and setting
+    // a new one resets the hide countdown so the annotation stays visible
+    // for the full 6 seconds from the last click.
+    KillTimer(g_annotHwnd, 1);
+    SetTimer(g_annotHwnd, 1, 6000, NULL);
 }
 
 // Hide the annotation
