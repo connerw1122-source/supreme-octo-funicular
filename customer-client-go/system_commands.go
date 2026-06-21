@@ -248,44 +248,42 @@ func HandleSystemCommand(msg map[string]interface{}) {
                         } else {
                                 value = 0
                         }
-                        // PowerShell command to set the registry value AND verify it.
-                        // Uses simple commands (no try/catch or $_) to avoid quoting
-                        // issues when embedded in a bat file.
-                        psCmd := fmt.Sprintf(
-                                `Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -Value %d -Type DWord -ErrorAction SilentlyContinue; (Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -ErrorAction SilentlyContinue).PromptOnSecureDesktop`,
-                                value)
+                        // Use 'reg add' instead of PowerShell — simpler, no quoting issues.
                         // Try direct first (works if already admin or SYSTEM)
-                        out, err := winExecPowerShellHidden(psCmd)
-                        out = strings.TrimSpace(out)
-                        // If we got back the value we set, it worked
-                        if err == nil && out == fmt.Sprintf("%d", value) {
-                                status := "enabled"
-                                if !enabled {
-                                        status = "disabled"
+                        regCmd := fmt.Sprintf(
+                                `reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop /t REG_DWORD /d %d /f`,
+                                value)
+                        out, err := winExecHidden(regCmd)
+                        if err == nil && strings.Contains(out, "successfully") {
+                                // Verify with reg query
+                                queryOut, _ := winExecHidden(
+                                        `reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop`)
+                                if strings.Contains(queryOut, fmt.Sprintf("0x%d", value)) {
+                                        status := "enabled"
+                                        if !enabled {
+                                                status = "disabled"
+                                        }
+                                        sendJSON(map[string]interface{}{
+                                                "type":    "uac-secure-desktop-result",
+                                                "result":  "success",
+                                                "enabled": enabled,
+                                                "status":  status,
+                                        })
+                                        return
                                 }
-                                sendJSON(map[string]interface{}{
-                                        "type":    "uac-secure-desktop-result",
-                                        "result":  "success",
-                                        "enabled": enabled,
-                                        "status":  status,
-                                })
-                                return
                         }
-                        // Either error or verification failed — need UAC elevation
+                        // Direct failed — need UAC elevation via reg.exe
                         tmpVbs := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.vbs")
                         tmpBat := filepath.Join(os.TempDir(), "marqueeit-uac-toggle.bat")
                         donePath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-done.txt")
                         errPath := filepath.Join(os.TempDir(), "marqueeit-uac-toggle-err.txt")
                         os.Remove(donePath)
                         os.Remove(errPath)
-                        // Escape the PowerShell command for embedding in a bat file.
-                        // Double quotes inside the bat's powershell -Command "..." need
-                        // to be escaped as backslash-quote.
-                        escPsCmd := strings.ReplaceAll(psCmd, `"`, `\"`)
+                        // Simple bat file using reg.exe (no PowerShell quoting issues)
                         bat := fmt.Sprintf(`@echo off
-powershell -NoProfile -NonInteractive -WindowStyle Hidden -Command "%s" > "%s" 2>&1
+reg add "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop /t REG_DWORD /d %d /f > "%s" 2>&1
 echo DONE > "%s"
-`, escPsCmd, errPath, donePath)
+`, value, errPath, donePath)
                         os.WriteFile(tmpBat, []byte(bat), 0644)
                         vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
 WshShell.Run "%s", 0, True
@@ -312,9 +310,7 @@ WshShell.Run "%s", 0, True
                         os.Remove(donePath)
                         os.Remove(errPath)
                         errStr := strings.TrimSpace(string(errContent))
-                        // The PowerShell command outputs the registry value on success.
-                        // Check if the output contains the value we set (0 or 1).
-                        if done && strings.Contains(errStr, fmt.Sprintf("%d", value)) {
+                        if done && strings.Contains(errStr, "successfully") {
                                 status := "enabled"
                                 if !enabled {
                                         status = "disabled"
@@ -345,10 +341,17 @@ WshShell.Run "%s", 0, True
         // --- Query UAC Secure Desktop status ---
         case "get-uac-secure-desktop":
                 if runtime.GOOS == "windows" {
-                        out, _ := winExecPowerShellHidden(
-                                `(Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name 'PromptOnSecureDesktop' -ErrorAction SilentlyContinue).PromptOnSecureDesktop`)
-                        out = strings.TrimSpace(out)
-                        enabled := out == "1" || out == ""
+                        out, _ := winExecHidden(
+                                `reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System" /v PromptOnSecureDesktop`)
+                        // reg query output looks like:
+                        //   PromptOnSecureDesktop    REG_DWORD    0x1
+                        // If the key doesn't exist, default is enabled (1)
+                        enabled := true // default
+                        if strings.Contains(out, "0x0") {
+                                enabled = false
+                        } else if strings.Contains(out, "0x1") {
+                                enabled = true
+                        }
                         sendJSON(map[string]interface{}{
                                 "type":    "uac-secure-desktop-status",
                                 "enabled": enabled,

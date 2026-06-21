@@ -756,6 +756,25 @@ export function SessionView({
     wsRef.current?.send(JSON.stringify({ type: 'clear-annotations' }))
   }
 
+  const handleStageClick = (e: React.MouseEvent) => {
+    if (controlMode) return
+    if (!showAnnotationMode) return
+    const coords = getRelativeCoords(e)
+    if (!coords) return
+    const a: Annotation = {
+      id: Math.random().toString(36).slice(2),
+      x: coords.x,
+      y: coords.y,
+      label: 'Click here',
+      createdAt: Date.now(),
+    }
+    setAnnotations((prev) => [...prev, a])
+    wsRef.current?.send(JSON.stringify({ type: 'annotation', x: a.x, y: a.y, label: a.label }))
+    setTimeout(() => {
+      setAnnotations((prev) => prev.filter((x) => x.id !== a.id))
+    }, 6000)
+  }
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       stageRef.current?.requestFullscreen?.()
