@@ -175,18 +175,7 @@ export function TechnicianDashboard({
   const connectToMachine = async (machine: UnattendedMachine) => {
     setCreating(true)
     try {
-      // Check if there's already an active/waiting session for this machine.
-      // If so, join it instead of creating a duplicate.
-      const existing = sessions.find(
-        (s) => s.unattendedMachineCode === machine.machineCode &&
-               (s.status === 'waiting' || s.status === 'active')
-      )
-      if (existing) {
-        toast.success(`Joining existing session for ${machine.customerName}…`)
-        onJoinSession(existing.id, existing.code, existing.title)
-        return
-      }
-      // No existing session — create a new one
+      // Create a session targeting this machine
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -337,7 +326,7 @@ export function TechnicianDashboard({
         </div>
       </header>
 
-      <main className="container mx-auto px-4 py-6">
+      <main className="px-4 py-4 h-[calc(100vh-60px)] overflow-hidden">
         {/* Stats */}
         <div className="grid sm:grid-cols-3 gap-3 mb-6">
           <Card>
@@ -385,21 +374,16 @@ export function TechnicianDashboard({
           </Card>
         </div>
 
-        {/* Side-by-side: Sessions + Unattended Machines */}
-        <div className="grid lg:grid-cols-2 gap-4">
+        <div className="grid lg:grid-cols-2 gap-4 h-[calc(100vh-120px)]">
           {/* Sessions */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle>Support Sessions</CardTitle>
-                <CardDescription>Active and waiting sessions.</CardDescription>
-              </div>
-              <Button variant="ghost" size="sm" onClick={() => { setLoading(true); fetchSessions() }}>
-                <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
+          <Card className="flex flex-col overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between shrink-0">
+              <CardTitle>Sessions</CardTitle>
+              <Button variant="ghost" size="sm" onClick={fetchSessions}>
+                <RefreshCw className="w-4 h-4 mr-1" />
               </Button>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1 overflow-auto">
                 {loading ? (
                   <div className="text-center py-12 text-slate-500">
                     <RefreshCw className="w-6 h-6 mx-auto mb-2 animate-spin" />
@@ -427,7 +411,7 @@ export function TechnicianDashboard({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {sessions.filter((s) => s.status !== 'ended').map((s) => (
+                        {sessions.map((s) => (
                           <TableRow key={s.id}>
                             <TableCell>
                               <button
@@ -466,8 +450,8 @@ export function TechnicianDashboard({
                                     Join
                                   </Button>
                                 )}
-                                {/* Reconnect button for ended/waiting unattended sessions only */}
-                                {s.unattendedMachineCode && (s.status === 'ended' || s.status === 'waiting') && (
+                                {/* Reconnect button for ended/invalid unattended sessions */}
+                                {s.unattendedMachineCode && (
                                   <Button
                                     size="sm"
                                     variant="outline"
@@ -500,8 +484,8 @@ export function TechnicianDashboard({
             </Card>
 
           {/* Unattended machines */}
-          <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
+          <Card className="flex flex-col overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between shrink-0">
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <Server className="w-5 h-5 text-[#1B3A6B]" />
