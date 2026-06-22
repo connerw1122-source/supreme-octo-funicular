@@ -687,6 +687,50 @@ func main() {
                 ctx, cancel := context.WithCancel(context.Background())
                 defer cancel()
                 go handleSignals(cancel)
+
+                // Start a Winlogon desktop monitor in the user session.
+                // This runs ALONGSIDE the unattended client. When it detects
+                // the Winlogon desktop (UAC prompt), it spawns a helper process
+                // on that desktop so the technician can see and interact with
+                // the UAC prompt. The helper is launched via CreateProcessAsUser
+                // using the winlogon.exe token (SYSTEM), so it can capture and
+                // inject input on the secure desktop.
+                go func() {
+                        var winlogonPid uint32
+                        for {
+                                select {
+                                case <-ctx.Done():
+                                        return
+                                case <-time.After(1 * time.Second):
+                                }
+                                deskName := getActiveDesktopNameString()
+                                if deskName == "Winlogon" {
+                                        // UAC prompt or lock screen detected
+                                        // Get the current session code from the client
+                                        var sessionCode string
+                                        if globalClient != nil {
+                                                globalClient.connMu.Lock()
+                                                sessionCode = globalClient.code
+                                                globalClient.connMu.Unlock()
+                                        }
+                                        if sessionCode != "" && winlogonPid == 0 {
+                                                exe, _ := os.Executable()
+                                                pid, err := launchHelperOnWinlogonDesktop(exe,
+                                                        fmt.Sprintf("--winlogon-helper --code %s --server %s",
+                                                                sessionCode, server))
+                                                if err != nil {
+                                                        log.Printf("[unattended] Winlogon helper failed: %v", err)
+                                                } else {
+                                                        winlogonPid = pid
+                                                        log.Printf("[unattended] Launched Winlogon helper (pid=%d) for UAC", pid)
+                                                }
+                                        }
+                                } else {
+                                        winlogonPid = 0
+                                }
+                        }
+                }()
+
                 if err := c.RunUnattended(ctx, unattended); err != nil {
                         log.Fatalf("Unattended mode failed: %v", err)
                 }

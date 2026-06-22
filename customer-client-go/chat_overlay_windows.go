@@ -50,14 +50,11 @@ static void clearInput() {
 static LRESULT CALLBACK ChatWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
     case WM_COMMAND: {
-        // Button click or Enter in input
         WORD cmd = LOWORD(wParam);
         if (cmd == 2 || cmd == 3) { // Send button or Enter
-            // Get input text and send it
             char buf[1024];
             int len = getInputText(buf, sizeof(buf));
             if (len > 0) {
-                // Write to the reply file that the Go code reads and sends
                 if (strlen(g_replyFilePath) > 0) {
                     HANDLE hFile = CreateFileA(g_replyFilePath,
                         GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -69,6 +66,8 @@ static LRESULT CALLBACK ChatWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                 }
                 clearInput();
             }
+        } else if (cmd == 4) { // Close button
+            ShowWindow(hwnd, SW_HIDE);
         }
         return 0;
     }
@@ -172,14 +171,20 @@ static int createChatWindow() {
     // Create the input field (single-line edit)
     g_chatInput = CreateWindowExA(0, "EDIT", "",
         WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_BORDER,
-        10, g_chatH - 45, g_chatW - 100, 28,
+        10, g_chatH - 45, g_chatW - 170, 28,
         g_chatHwnd, (HMENU)1, GetModuleHandle(NULL), NULL);
 
     // Create the Send button
     g_chatSendBtn = CreateWindowExA(0, "BUTTON", "Send",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
-        g_chatW - 80, g_chatH - 45, 70, 28,
+        g_chatW - 150, g_chatH - 45, 60, 28,
         g_chatHwnd, (HMENU)2, GetModuleHandle(NULL), NULL);
+
+    // Create the Close button
+    CreateWindowExA(0, "BUTTON", "X",
+        WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+        g_chatW - 80, g_chatH - 45, 70, 28,
+        g_chatHwnd, (HMENU)4, GetModuleHandle(NULL), NULL);
 
     // Set fonts on the child controls
     HFONT hCtrlFont = CreateFont(14, 0, 0, 0, FW_NORMAL, 0, 0, 0, 0, 0, 0, 0, 0, "Segoe UI");

@@ -23,12 +23,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from '@/components/ui/tabs'
-import {
   Copy,
   Check,
   Plus,
@@ -181,7 +175,18 @@ export function TechnicianDashboard({
   const connectToMachine = async (machine: UnattendedMachine) => {
     setCreating(true)
     try {
-      // Create a session targeting this machine
+      // Check if there's already an active/waiting session for this machine.
+      // If so, join it instead of creating a duplicate.
+      const existing = sessions.find(
+        (s) => s.unattendedMachineCode === machine.machineCode &&
+               (s.status === 'waiting' || s.status === 'active')
+      )
+      if (existing) {
+        toast.success(`Joining existing session for ${machine.customerName}…`)
+        onJoinSession(existing.id, existing.code, existing.title)
+        return
+      }
+      // No existing session — create a new one
       const res = await fetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -380,31 +385,21 @@ export function TechnicianDashboard({
           </Card>
         </div>
 
-        <Tabs defaultValue="sessions" className="w-full">
-          <TabsList className="bg-white border border-slate-200">
-            <TabsTrigger value="sessions">Sessions</TabsTrigger>
-            <TabsTrigger value="unattended">
-              Unattended Machines
-              {machines.length > 0 && (
-                <span className="ml-1.5 text-xs text-slate-500">({machines.length})</span>
-              )}
-            </TabsTrigger>
-          </TabsList>
-
-          {/* Sessions tab */}
-          <TabsContent value="sessions" className="mt-4">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle>Support Sessions</CardTitle>
-                  <CardDescription>Create a session and share the code with your customer.</CardDescription>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => { setLoading(true); fetchSessions() }}>
-                  <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
-              </CardHeader>
-              <CardContent>
+        {/* Side-by-side: Sessions + Unattended Machines */}
+        <div className="grid lg:grid-cols-2 gap-4">
+          {/* Sessions */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle>Support Sessions</CardTitle>
+                <CardDescription>Create a session and share the code with your customer.</CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => { setLoading(true); fetchSessions() }}>
+                <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
+              </Button>
+            </CardHeader>
+            <CardContent>
                 {loading ? (
                   <div className="text-center py-12 text-slate-500">
                     <RefreshCw className="w-6 h-6 mx-auto mb-2 animate-spin" />
@@ -503,11 +498,9 @@ export function TechnicianDashboard({
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
 
-          {/* Unattended machines tab */}
-          <TabsContent value="unattended" className="mt-4">
-            <Card>
+          {/* Unattended machines */}
+          <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
@@ -607,8 +600,7 @@ export function TechnicianDashboard({
                 )}
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+        </div>
       </main>
 
       {/* Create session dialog */}
