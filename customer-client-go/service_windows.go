@@ -107,7 +107,8 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                                 // Check if the user-session process wrote a signal
                                 data, err := os.ReadFile(signalPath)
                                 if err != nil {
-                                        // No signal — back on Default desktop
+                                        // No signal file — back on Default desktop.
+                                        // Reset PID so we can launch a new helper next time.
                                         winlogonPid = 0
                                         continue
                                 }
@@ -122,13 +123,15 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                                         continue
                                 }
 
-                                // Only launch once per signal (don't spam processes)
+                                // Only launch one helper per signal.
+                                // When the signal file disappears (desktop back to Default),
+                                // winlogonPid is reset to 0 above, allowing a new launch.
+                                // NOTE: os.FindProcess on Windows ALWAYS succeeds — it does
+                                // NOT check if the process is running. So we can't use it to
+                                // check if the helper is still alive. Instead, we rely on the
+                                // helper exiting itself when the desktop switches back.
                                 if winlogonPid != 0 {
-                                        // Check if the previous helper is still running
-                                        if _, err := os.FindProcess(int(winlogonPid)); err == nil {
-                                                continue // still running
-                                        }
-                                        winlogonPid = 0
+                                        continue
                                 }
 
                                 // Launch the Winlogon helper as SYSTEM on the secure desktop

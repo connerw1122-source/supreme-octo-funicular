@@ -673,6 +673,11 @@ func main() {
         // capture will return all-black or fail, and the helper exits.
         if winlogonHelper {
                 winlogonHelperMode = true
+                // Log to a file so we can debug UAC issues
+                logFile, _ := os.OpenFile(`C:\ProgramData\MarqueeIT\winlogon-helper.log`, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+                if logFile != nil {
+                        log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+                }
                 if code == "" {
                         log.Fatalf("[winlogon-helper] No session code provided")
                         os.Exit(1)
@@ -682,9 +687,32 @@ func main() {
                 ctx, cancel := context.WithCancel(context.Background())
                 defer cancel()
                 go handleSignals(cancel)
+
+                // Exit watcher — the helper should exit when the desktop switches
+                // back to "Default" (UAC resolved). Without this, the helper keeps
+                // running and sending frames of the Default desktop, conflicting
+                // with the regular client and causing flicker.
+                go func() {
+                        for {
+                                select {
+                                case <-ctx.Done():
+                                        return
+                                case <-time.After(500 * time.Millisecond):
+                                }
+                                deskName := getActiveDesktopNameString()
+                                if deskName == "Default" {
+                                        log.Printf("[winlogon-helper] Desktop switched back to Default — exiting")
+                                        cancel()
+                                        return
+                                }
+                        }
+                }()
+
                 if err := c.Run(ctx); err != nil {
                         log.Printf("[winlogon-helper] Session ended: %v", err)
                 }
+                // Exit immediately after the session ends — don't hang around
+                os.Exit(0)
                 return
         }
 

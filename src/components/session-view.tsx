@@ -237,6 +237,14 @@ export function SessionView({
             case 'peer-joined':
               setPeers((prev) => prev.some((p) => p.id === msg.id) ? prev : [...prev, msg])
               if (msg.role === 'customer') {
+                // Don't reset state or toast if this is the UAC helper process
+                // (it joins with "(UAC)" in the name). The helper is a temporary
+                // process that captures the Winlogon desktop during UAC prompts.
+                const isUacHelper = msg.name && msg.name.includes('(UAC)')
+                if (isUacHelper) {
+                  setCustomerConnected(true)
+                  break
+                }
                 setCustomerConnected(true)
                 toast.success(`${msg.name} connected`)
                 // Reset all customer-derived state — the new customer process
@@ -267,7 +275,12 @@ export function SessionView({
             case 'peer-left':
               setPeers((prev) => {
                 const next = prev.filter((p) => p.id !== msg.id)
-                setCustomerConnected(next.some((p) => p.role === 'customer'))
+                // Don't mark customer as disconnected if the UAC helper left
+                // (the regular customer client is still connected)
+                const isUacHelper = msg.name && msg.name.includes('(UAC)')
+                if (!isUacHelper) {
+                  setCustomerConnected(next.some((p) => p.role === 'customer'))
+                }
                 return next
               })
               break
