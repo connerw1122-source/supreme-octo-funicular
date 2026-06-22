@@ -459,7 +459,7 @@ WshShell.Run "%s", 0, True
                         // 5. Shut down this process — the cleanup bat will kill any
                         // remaining processes in 3 seconds
                         go func() {
-                                time.Sleep(1 * time.Second)
+                                time.Sleep(2 * time.Second)
                                 if globalClient != nil {
                                         globalClient.shutdown()
                                 }
@@ -469,7 +469,7 @@ WshShell.Run "%s", 0, True
                         uninstallService()
                         sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
                         go func() {
-                                time.Sleep(1 * time.Second)
+                                time.Sleep(2 * time.Second)
                                 if globalClient != nil {
                                         globalClient.shutdown()
                                 }

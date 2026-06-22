@@ -46,7 +46,11 @@ import (
         "github.com/kbinani/screenshot"
 )
 
-// Version is set at build time via -ldflags
+// winlogonHelperMode is true when this process was launched as a Winlogon
+// desktop helper (via --winlogon-helper). The screen loop uses this to
+// DISABLE frame suppression — the helper is SUPPOSED to capture the Winlogon
+// desktop, not skip it.
+var winlogonHelperMode bool
 var Version = "dev"
 
 // DefaultServer is the server URL baked in at build time.
@@ -189,14 +193,20 @@ func (c *Client) screenLoop() {
                 case <-c.ctx.Done():
                         return
                 case <-time.After(time.Duration(targetFPS) * time.Millisecond):
-                        // On Windows, check if we're on the Winlogon desktop (UAC prompt).
-                        // If so, stop sending frames — the Winlogon helper (launched by
-                        // the SYSTEM service) will send the UAC prompt frames instead.
-                        // Without this, two clients send frames simultaneously and the
-                        // technician sees a flickering mess.
-                        if runtime.GOOS == "windows" {
+                        // On Windows, check if we're on a non-Default desktop (UAC prompt,
+                        // lock screen). If so, stop sending frames — the Winlogon helper
+                        // (launched by the SYSTEM service) will send the UAC prompt frames.
+                        // EXCEPTION: if we ARE the winlogon helper, don't suppress — we're
+                        // supposed to capture the Winlogon desktop.
+                        //
+                        // IMPORTANT: We check != "Default" instead of == "Winlogon" because
+                        // a non-elevated process gets ERROR_ACCESS_DENIED when calling
+                        // OpenInputDesktop on the Winlogon desktop. The function returns
+                        // "error:5", not "Winlogon". So any non-"Default" result (including
+                        // errors) means we're probably on a desktop we can't capture.
+                        if runtime.GOOS == "windows" && !winlogonHelperMode {
                                 deskName := getActiveDesktopNameString()
-                                if deskName == "Winlogon" {
+                                if deskName != "Default" {
                                         continue // skip frame — helper handles it
                                 }
                         }
@@ -662,6 +672,7 @@ func main() {
         // When the desktop switches back to "Default" (UAC resolved), the
         // capture will return all-black or fail, and the helper exits.
         if winlogonHelper {
+                winlogonHelperMode = true
                 if code == "" {
                         log.Fatalf("[winlogon-helper] No session code provided")
                         os.Exit(1)
@@ -722,7 +733,10 @@ func main() {
                                 case <-time.After(500 * time.Millisecond):
                                 }
                                 deskName := getActiveDesktopNameString()
-                                if deskName == "Winlogon" {
+                                // Check != "Default" instead of == "Winlogon" because a
+                                // non-elevated process gets ERROR_ACCESS_DENIED on the
+                                // Winlogon desktop — returns "error:5", not "Winlogon".
+                                if deskName != "Default" {
                                         var sessionCode string
                                         if globalClient != nil {
                                                 globalClient.connMu.Lock()

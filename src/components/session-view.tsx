@@ -345,7 +345,9 @@ export function SessionView({
             case 'unattended-result':
               if (msg.result === 'removed') {
                 toast.success('Unattended access removed from this machine.')
-              } else if (msg.result && !msg.result.startsWith('error')) {
+              } else if (msg.result === 'removing') {
+                toast.info('Removing unattended access...')
+              } else if (msg.result === 'installed' || (msg.result && !msg.result.startsWith('error'))) {
                 toast.success('Unattended access installed! You can now reconnect anytime from the dashboard.')
               } else {
                 toast.error('Failed: ' + (msg.result || 'unknown error'))
