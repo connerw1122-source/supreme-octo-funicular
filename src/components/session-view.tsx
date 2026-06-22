@@ -285,8 +285,19 @@ export function SessionView({
               })
               break
             case 'presence':
-              setPeers(msg.peers || [])
-              setCustomerConnected((msg.peers || []).some((p: Peer) => p.role === 'customer'))
+              {
+                const rawPeers = msg.peers || []
+                // Dedup by id (the server may send duplicates if there's a race
+                // between peer-joined and presence broadcast)
+                const seen = new Set<string>()
+                const deduped = rawPeers.filter((p: Peer) => {
+                  if (seen.has(p.id)) return false
+                  seen.add(p.id)
+                  return true
+                })
+                setPeers(deduped)
+                setCustomerConnected(deduped.some((p: Peer) => p.role === 'customer'))
+              }
               break
             case 'chat-message':
               setChatMessages((prev) => [...prev, msg])

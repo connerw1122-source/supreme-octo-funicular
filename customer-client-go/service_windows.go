@@ -34,16 +34,12 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                 // process (launched via launchHelperInUserSession) does the actual
                 // screen capture and session connections.
                 //
-                // The service also monitors for the Winlogon signal file and
-                // launches UAC helpers (it has SeDebugPrivilege, the user-session
-                // process doesn't).
+                // The service also:
+                // 1. Re-launches the user-session helper if it dies (reboot recovery)
+                // 2. Monitors for the Winlogon signal file and launches UAC helpers
                 go func() {
                         c := NewClient(s.serverURL, "", hostname())
                         go handleSignals(cancel)
-                        // Only register + heartbeat — don't call RunUnattended
-                        // because that would start screen capture from Session 0
-                        // (which fails) and create a race with the user-session
-                        // process.
                         c.machineCode = strings.ToUpper(strings.TrimSpace(s.machineCode))
                         c.unattended = true
                         c.ctx, c.cancel = context.WithCancel(ctx)
@@ -68,21 +64,45 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                                 }
                         }
 
-                        // Heartbeat loop only — no session connections, no screen capture
+                        // Heartbeat loop + user-session helper recovery
                         for {
                                 select {
                                 case <-ctx.Done():
                                         return
                                 case <-time.After(10 * time.Second):
                                 }
+
+                                // Heartbeat
                                 heartbeatURL := fmt.Sprintf("%s/api/unattended/%s/heartbeat", c.serverURL, c.machineCode)
                                 body, _ := json.Marshal(map[string]string{"hostname": c.hostname, "os": c.os})
                                 resp, err := http.Post(heartbeatURL, "application/json", bytes.NewReader(body))
                                 if err != nil {
                                         log.Printf("[service] Heartbeat error: %v", err)
-                                        continue
+                                } else {
+                                        resp.Body.Close()
                                 }
-                                resp.Body.Close()
+
+                                // Check if the user-session helper is running by
+                                // looking for its signal file activity. If the file
+                                // hasn't been touched recently, the helper may have
+                                // died — re-launch it.
+                                // We use a heartbeat marker file that the user-session
+                                // process updates on each heartbeat.
+                                markerPath := `C:\ProgramData\MarqueeIT\user-session-alive.txt`
+                                if info, err := os.Stat(markerPath); err == nil {
+                                        // File exists — check if it's recent (within 30s)
+                                        if time.Since(info.ModTime()) > 30*time.Second {
+                                                // Stale — helper probably died. Re-launch.
+                                                log.Printf("[service] User-session helper appears dead, re-launching")
+                                                exe, _ := os.Executable()
+                                                launchHelperInUserSession(exe, fmt.Sprintf("--unattended %s --server %s", s.machineCode, s.serverURL))
+                                        }
+                                } else {
+                                        // File doesn't exist — helper was never started or was removed.
+                                        // Try launching it.
+                                        exe, _ := os.Executable()
+                                        launchHelperInUserSession(exe, fmt.Sprintf("--unattended %s --server %s", s.machineCode, s.serverURL))
+                                }
                         }
                 }()
 

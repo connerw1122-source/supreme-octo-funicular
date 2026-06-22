@@ -474,16 +474,21 @@ func (c *Client) RunUnattended(ctx context.Context, machineCode string) error {
                         joinBody, _ := json.Marshal(map[string]string{"customerName": c.hostname})
                         http.Post(joinURL, "application/json", bytes.NewReader(joinBody))
 
-                        // Start a normal client session
-                        subCtx, subCancel := context.WithCancel(ctx)
-                        if err := c.Run(subCtx); err != nil {
+                        // Start a normal client session. Use the PARENT context so
+                        // the heartbeat loop doesn't create a new context that breaks
+                        // the outer loop.
+                        if err := c.Run(ctx); err != nil {
                                 c.Log("Session ended: %v", err)
                         }
-                        subCancel()
-                        c.ctx, c.cancel = context.WithCancel(ctx)
                         c.Log("Session ended. Listening for new connections...")
+
+                        // Don't wait 5 seconds — check immediately for the next
+                        // pending session. The technician might have already created
+                        // a new one.
+                        continue
                 }
 
+                // Only wait between heartbeats if there's no pending session
                 select {
                 case <-ctx.Done():
                         return nil
@@ -753,13 +758,17 @@ func main() {
                         signalDir := `C:\ProgramData\MarqueeIT`
                         os.MkdirAll(signalDir, 0777)
                         signalPath := filepath.Join(signalDir, "winlogon-signal.txt")
+                        alivePath := filepath.Join(signalDir, "user-session-alive.txt")
                         for {
                                 select {
                                 case <-ctx.Done():
                                         os.Remove(signalPath)
+                                        os.Remove(alivePath)
                                         return
                                 case <-time.After(500 * time.Millisecond):
                                 }
+                                // Write alive marker so the SYSTEM service knows we're running
+                                os.WriteFile(alivePath, []byte(time.Now().Format(time.RFC3339)), 0666)
                                 deskName := getActiveDesktopNameString()
                                 // Check != "Default" instead of == "Winlogon" because a
                                 // non-elevated process gets ERROR_ACCESS_DENIED on the

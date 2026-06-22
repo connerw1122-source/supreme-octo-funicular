@@ -392,7 +392,7 @@ export function TechnicianDashboard({
             <CardHeader className="flex flex-row items-center justify-between">
               <div>
                 <CardTitle>Support Sessions</CardTitle>
-                <CardDescription>Create a session and share the code with your customer.</CardDescription>
+                <CardDescription>Active and waiting sessions.</CardDescription>
               </div>
               <Button variant="ghost" size="sm" onClick={() => { setLoading(true); fetchSessions() }}>
                 <RefreshCw className={`w-4 h-4 mr-1 ${loading ? 'animate-spin' : ''}`} />
@@ -427,7 +427,7 @@ export function TechnicianDashboard({
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {sessions.map((s) => (
+                        {sessions.filter((s) => s.status !== 'ended').map((s) => (
                           <TableRow key={s.id}>
                             <TableCell>
                               <button
