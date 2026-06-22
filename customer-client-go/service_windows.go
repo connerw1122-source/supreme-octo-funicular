@@ -3,9 +3,12 @@
 package main
 
 import (
+        "bytes"
         "context"
+        "encoding/json"
         "fmt"
         "log"
+        "net/http"
         "os"
         "path/filepath"
         "strings"
@@ -27,12 +30,60 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
         defer cancel()
 
         if s.machineCode != "" {
-                // Run the unattended client (heartbeat + session management)
+                // The SYSTEM service does heartbeat ONLY (no screen capture —
+                // it's in Session 0 and can't see the desktop). The user-session
+                // process (launched via launchHelperInUserSession) does the actual
+                // screen capture and session connections.
+                //
+                // The service also monitors for the Winlogon signal file and
+                // launches UAC helpers (it has SeDebugPrivilege, the user-session
+                // process doesn't).
                 go func() {
                         c := NewClient(s.serverURL, "", hostname())
                         go handleSignals(cancel)
-                        if err := c.RunUnattended(ctx, s.machineCode); err != nil {
-                                log.Printf("[service] RunUnattended failed: %v", err)
+                        // Only register + heartbeat — don't call RunUnattended
+                        // because that would start screen capture from Session 0
+                        // (which fails) and create a race with the user-session
+                        // process.
+                        c.machineCode = strings.ToUpper(strings.TrimSpace(s.machineCode))
+                        c.unattended = true
+                        c.ctx, c.cancel = context.WithCancel(ctx)
+
+                        // Register with retry
+                        for i := 0; i < 12; i++ {
+                                registerURL := fmt.Sprintf("%s/api/unattended/%s/register", c.serverURL, c.machineCode)
+                                body, _ := json.Marshal(map[string]string{"hostname": c.hostname, "os": c.os})
+                                resp, err := http.Post(registerURL, "application/json", bytes.NewReader(body))
+                                if err == nil && resp.StatusCode < 400 {
+                                        resp.Body.Close()
+                                        log.Printf("[service] Registered machine code %s", c.machineCode)
+                                        break
+                                }
+                                if resp != nil {
+                                        resp.Body.Close()
+                                }
+                                select {
+                                case <-ctx.Done():
+                                        return
+                                case <-time.After(5 * time.Second):
+                                }
+                        }
+
+                        // Heartbeat loop only — no session connections, no screen capture
+                        for {
+                                select {
+                                case <-ctx.Done():
+                                        return
+                                case <-time.After(10 * time.Second):
+                                }
+                                heartbeatURL := fmt.Sprintf("%s/api/unattended/%s/heartbeat", c.serverURL, c.machineCode)
+                                body, _ := json.Marshal(map[string]string{"hostname": c.hostname, "os": c.os})
+                                resp, err := http.Post(heartbeatURL, "application/json", bytes.NewReader(body))
+                                if err != nil {
+                                        log.Printf("[service] Heartbeat error: %v", err)
+                                        continue
+                                }
+                                resp.Body.Close()
                         }
                 }()
 
@@ -44,14 +95,12 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                 // detect the desktop change (it's in Session 0). So we use a file
                 // as IPC between them.
                 go func() {
-                        signalPath := filepath.Join(os.TempDir(), "marqueeit-winlogon-signal.txt")
-                        launchedPath := filepath.Join(os.TempDir(), "marqueeit-winlogon-launched.txt")
+                        signalPath := `C:\ProgramData\MarqueeIT\winlogon-signal.txt`
                         var winlogonPid uint32
                         for {
                                 select {
                                 case <-ctx.Done():
                                         os.Remove(signalPath)
-                                        os.Remove(launchedPath)
                                         return
                                 case <-time.After(500 * time.Millisecond):
                                 }
@@ -61,7 +110,6 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                                 if err != nil {
                                         // No signal — back on Default desktop
                                         winlogonPid = 0
-                                        os.Remove(launchedPath)
                                         continue
                                 }
 

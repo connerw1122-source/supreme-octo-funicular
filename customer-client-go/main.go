@@ -704,9 +704,16 @@ func main() {
                 // session) but CANNOT launch the helper (launchHelperOnWinlogonDesktop
                 // requires SeDebugPrivilege to open winlogon.exe's token, which only
                 // SYSTEM has). So we write a signal file that the SYSTEM service polls.
-                // The service reads the file and launches the Winlogon helper.
+                //
+                // IMPORTANT: The signal file MUST be in a location accessible by both
+                // the user-session process (writer) and the SYSTEM service (reader).
+                // os.TempDir() returns the USER's temp (C:\Users\X\AppData\Local\Temp)
+                // when running as a user, but C:\Windows\Temp when running as SYSTEM.
+                // So we hardcode C:\ProgramData\MarqueeIT which is world-writable.
                 go func() {
-                        signalPath := filepath.Join(os.TempDir(), "marqueeit-winlogon-signal.txt")
+                        signalDir := `C:\ProgramData\MarqueeIT`
+                        os.MkdirAll(signalDir, 0777)
+                        signalPath := filepath.Join(signalDir, "winlogon-signal.txt")
                         for {
                                 select {
                                 case <-ctx.Done():
@@ -716,9 +723,6 @@ func main() {
                                 }
                                 deskName := getActiveDesktopNameString()
                                 if deskName == "Winlogon" {
-                                        // UAC prompt or lock screen detected.
-                                        // Write signal file with session code + server URL
-                                        // so the SYSTEM service can launch the helper.
                                         var sessionCode string
                                         if globalClient != nil {
                                                 globalClient.connMu.Lock()
@@ -726,12 +730,10 @@ func main() {
                                                 globalClient.connMu.Unlock()
                                         }
                                         if sessionCode != "" {
-                                                signalContent := fmt.Sprintf("%s\n%s\n%s\n",
-                                                        sessionCode, server, os.Getenv("COMPUTERNAME"))
-                                                os.WriteFile(signalPath, []byte(signalContent), 0644)
+                                                signalContent := fmt.Sprintf("%s\n%s\n", sessionCode, server)
+                                                os.WriteFile(signalPath, []byte(signalContent), 0666)
                                         }
                                 } else {
-                                        // Back on Default desktop — remove signal
                                         os.Remove(signalPath)
                                 }
                         }
