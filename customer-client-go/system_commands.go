@@ -359,118 +359,122 @@ WshShell.Run "%s", 0, True
                 }
 
         // --- Remove unattended service ---
+        // This completely removes unattended access:
+        // 1. Deletes the server-side machine registration (so it disappears from dashboard)
+        // 2. Creates an elevated cleanup bat that kills all processes, deletes the
+        //    service, and deletes the scheduled task
+        // 3. Sends the result BEFORE the bat runs (the bat kills this process)
+        // 4. Shuts down this process (the bat cleans up 3 seconds later)
         case "remove-unattended":
+                // Send "removing..." status immediately
+                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removing"})
+
+                // Get the machine code and server URL for server-side deletion
+                machineCode := ""
+                serverURL := ""
+                if globalClient != nil {
+                        machineCode = globalClient.machineCode
+                        serverURL = globalClient.serverURL
+                }
+
+                // 1. Delete the server-side registration FIRST (before killing ourselves)
+                if machineCode != "" && serverURL != "" {
+                        deleteURL := fmt.Sprintf("%s/api/unattended/%s/delete", serverURL, machineCode)
+                        req, _ := http.NewRequest("DELETE", deleteURL, nil)
+                        client := &http.Client{Timeout: 5 * time.Second}
+                        resp, err := client.Do(req)
+                        if err != nil {
+                                log.Printf("[remove-unattended] Failed to delete server registration: %v", err)
+                        } else {
+                                resp.Body.Close()
+                                log.Printf("[remove-unattended] Server registration deleted (status %d)", resp.StatusCode)
+                        }
+                }
+
                 if runtime.GOOS == "windows" {
                         serviceName := "MarqueeIT"
-
-                        // First, kill any running MarqueeIT processes (the background
-                        // --unattended process, the service helper, etc.) so they don't
-                        // interfere with removal or re-register after we delete.
-                        exec.Command("taskkill", "/im", "marqueeit-client-windows.exe", "/f").Run()
-                        // Also try the generic name in case the exe was renamed
+                        exeName := "marqueeit-client-windows.exe"
                         if exe, err := os.Executable(); err == nil {
-                                exec.Command("taskkill", "/im", filepath.Base(exe), "/f").Run()
-                        }
-                        time.Sleep(1 * time.Second)
-
-                        // Try direct removal first (works if SYSTEM or already admin).
-                        // Also delete the scheduled task (non-fatal if it doesn't exist).
-                        exec.Command("schtasks", "/delete", "/tn", "MarqueeIT", "/f").Run()
-                        stopOut, _ := exec.Command("sc", "stop", serviceName).CombinedOutput()
-                        _ = stopOut
-                        time.Sleep(1 * time.Second)
-                        deleteOut, deleteErr := exec.Command("sc", "delete", serviceName).CombinedOutput()
-                        deleteOutStr := strings.TrimSpace(string(deleteOut))
-                        if deleteErr == nil || strings.Contains(deleteOutStr, "SUCCESS") {
-                                // Success — no UAC needed
-                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
-                                return
-                        }
-                        // Check if the service doesn't exist (already removed)
-                        if strings.Contains(deleteOutStr, "does not exist") || strings.Contains(deleteOutStr, "1060") || strings.Contains(deleteOutStr, "not exist") {
-                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
-                                return
-                        }
-                        // Access denied — need UAC elevation
-                        if !strings.Contains(deleteOutStr, "Access") && !strings.Contains(deleteOutStr, "denied") && !strings.Contains(deleteOutStr, "5") {
-                                // Some other error
-                                sendJSON(map[string]interface{}{
-                                        "type":   "unattended-result",
-                                        "result": "error: sc delete failed: " + deleteOutStr,
-                                })
-                                return
+                                exeName = filepath.Base(exe)
                         }
 
-                        // Need UAC elevation — use the bat + VBS + wscript approach
-                        tmpBat := filepath.Join(os.TempDir(), "marqueeit-remove-svc.bat")
-                        tmpVbs := filepath.Join(os.TempDir(), "marqueeit-remove-svc.vbs")
-                        donePath := filepath.Join(os.TempDir(), "marqueeit-remove-done.txt")
-                        errPath := filepath.Join(os.TempDir(), "marqueeit-remove-err.txt")
+                        // 2. Create a self-contained cleanup bat that does EVERYTHING.
+                        // The bat waits 3 seconds (so this process can send the result
+                        // and exit), then kills all processes, deletes the service,
+                        // deletes the scheduled task, and deletes itself.
+                        tmpBat := filepath.Join(os.TempDir(), "marqueeit-cleanup.bat")
+                        donePath := filepath.Join(os.TempDir(), "marqueeit-cleanup-done.txt")
                         os.Remove(donePath)
-                        os.Remove(errPath)
-                        // The bat kills processes, stops and deletes the service,
-                        // and deletes the scheduled task. Writes output to errPath
-                        // so we can verify success.
+
                         bat := fmt.Sprintf(`@echo off
-timeout /t 2 /nobreak >nul
-taskkill /im "marqueeit-client-windows.exe" /f >nul 2>&1
-sc stop "%s" > "%s" 2>&1
+REM Wait 3 seconds for the current process to exit gracefully
+timeout /t 3 /nobreak >nul
+REM Kill all MarqueeIT processes
+taskkill /im "%s" /f >nul 2>&1
+REM Stop and delete the service
+sc stop "%s" >nul 2>&1
 timeout /t 1 /nobreak >nul
-sc delete "%s" >> "%s" 2>&1
-schtasks /delete /tn "MarqueeIT" /f >> "%s" 2>&1
+sc delete "%s" >nul 2>&1
+REM Delete the scheduled task
+schtasks /delete /tn "MarqueeIT" /f >nul 2>&1
+REM Delete the autostart registry key (if it exists)
+reg delete "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v MarqueeIT /f >nul 2>&1
+reg delete "HKLM\Software\Microsoft\Windows\CurrentVersion\Run" /v MarqueeIT /f >nul 2>&1
+REM Write done marker
 echo DONE > "%s"
-`, serviceName, errPath, serviceName, errPath, errPath, donePath)
+REM Self-delete this bat file
+del "%%~f0"
+`, exeName, serviceName, serviceName, donePath)
                         os.WriteFile(tmpBat, []byte(bat), 0644)
-                        vbs := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
-WshShell.Run "%s", 0, True
-`, tmpBat)
-                        os.WriteFile(tmpVbs, []byte(vbs), 0644)
-                        psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`,
-                                tmpVbs)
-                        cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
+
+                        // 3. Try to run the cleanup bat directly first (works if admin/SYSTEM)
+                        cmd := exec.Command(tmpBat)
                         cmd.SysProcAttr = &syscall.SysProcAttr{}
                         hideWindow(cmd.SysProcAttr)
-                        if err := cmd.Start(); err != nil {
-                                sendJSON(map[string]interface{}{
-                                        "type":   "unattended-result",
-                                        "result": "error: could not start PowerShell for UAC elevation: " + err.Error(),
-                                })
-                                os.Remove(tmpBat)
-                                os.Remove(tmpVbs)
-                                return
-                        }
-                        cmd.Wait()
-                        // Wait for the done marker (up to 30 seconds)
-                        removed := false
-                        for i := 0; i < 60; i++ {
-                                if _, err := os.Stat(donePath); err == nil {
-                                        removed = true
-                                        break
-                                }
-                                time.Sleep(500 * time.Millisecond)
-                        }
-                        os.Remove(tmpBat)
-                        os.Remove(tmpVbs)
-                        errContent, _ := os.ReadFile(errPath)
-                        os.Remove(donePath)
-                        os.Remove(errPath)
-                        errStr := strings.TrimSpace(string(errContent))
-                        // Verify that sc delete actually succeeded by checking the output
-                        if removed && strings.Contains(errStr, "SUCCESS") {
-                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
-                        } else if removed && (strings.Contains(errStr, "not exist") || strings.Contains(errStr, "1060")) {
-                                // Service didn't exist — already removed
-                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                        if cmd.Start() == nil {
+                                // Direct launch worked — we're admin
+                                log.Printf("[remove-unattended] Launched cleanup directly (admin)")
                         } else {
-                                errMsg := "error: service removal failed — the customer may have clicked No on the UAC prompt"
-                                if errStr != "" {
-                                        errMsg += "\nOutput: " + errStr
-                                }
-                                sendJSON(map[string]interface{}{"type": "unattended-result", "result": errMsg})
+                                // Need UAC elevation
+                                vbs := filepath.Join(os.TempDir(), "marqueeit-cleanup.vbs")
+                                vbsContent := fmt.Sprintf(`Set WshShell = CreateObject("WScript.Shell")
+WshShell.Run "%s", 0, True
+`, tmpBat)
+                                os.WriteFile(vbs, []byte(vbsContent), 0644)
+                                psCmd := fmt.Sprintf(`Start-Process -FilePath "wscript.exe" -ArgumentList '"%s"' -Verb RunAs`, vbs)
+                                elevCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", psCmd)
+                                elevCmd.SysProcAttr = &syscall.SysProcAttr{}
+                                hideWindow(elevCmd.SysProcAttr)
+                                elevCmd.Start()
+                                elevCmd.Wait()
+                                log.Printf("[remove-unattended] Launched cleanup via UAC elevation")
                         }
+
+                        // 4. Send the result to the technician BEFORE we get killed
+                        sendJSON(map[string]interface{}{
+                                "type":   "unattended-result",
+                                "result": "removed",
+                        })
+
+                        // 5. Shut down this process — the cleanup bat will kill any
+                        // remaining processes in 3 seconds
+                        go func() {
+                                time.Sleep(1 * time.Second)
+                                if globalClient != nil {
+                                        globalClient.shutdown()
+                                }
+                                os.Exit(0)
+                        }()
                 } else {
                         uninstallService()
                         sendJSON(map[string]interface{}{"type": "unattended-result", "result": "removed"})
+                        go func() {
+                                time.Sleep(1 * time.Second)
+                                if globalClient != nil {
+                                        globalClient.shutdown()
+                                }
+                                os.Exit(0)
+                        }()
                 }
 
         // --- Install as unattended service (during active session) ---
