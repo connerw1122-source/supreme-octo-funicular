@@ -189,6 +189,17 @@ func (c *Client) screenLoop() {
                 case <-c.ctx.Done():
                         return
                 case <-time.After(time.Duration(targetFPS) * time.Millisecond):
+                        // On Windows, check if we're on the Winlogon desktop (UAC prompt).
+                        // If so, stop sending frames — the Winlogon helper (launched by
+                        // the SYSTEM service) will send the UAC prompt frames instead.
+                        // Without this, two clients send frames simultaneously and the
+                        // technician sees a flickering mess.
+                        if runtime.GOOS == "windows" {
+                                deskName := getActiveDesktopNameString()
+                                if deskName == "Winlogon" {
+                                        continue // skip frame — helper handles it
+                                }
+                        }
                         // Use desktop-aware capture (handles lock screen on Windows)
                         var img *image.RGBA
                         var err error
@@ -689,44 +700,39 @@ func main() {
                 go handleSignals(cancel)
 
                 // Start a Winlogon desktop monitor in the user session.
-                // This runs ALONGSIDE the unattended client. When it detects
-                // the Winlogon desktop (UAC prompt), it spawns a helper process
-                // on that desktop so the technician can see and interact with
-                // the UAC prompt. The helper is launched via CreateProcessAsUser
-                // using the winlogon.exe token (SYSTEM), so it can capture and
-                // inject input on the secure desktop.
+                // This process CAN detect the desktop change (it's in the user's
+                // session) but CANNOT launch the helper (launchHelperOnWinlogonDesktop
+                // requires SeDebugPrivilege to open winlogon.exe's token, which only
+                // SYSTEM has). So we write a signal file that the SYSTEM service polls.
+                // The service reads the file and launches the Winlogon helper.
                 go func() {
-                        var winlogonPid uint32
+                        signalPath := filepath.Join(os.TempDir(), "marqueeit-winlogon-signal.txt")
                         for {
                                 select {
                                 case <-ctx.Done():
+                                        os.Remove(signalPath)
                                         return
-                                case <-time.After(1 * time.Second):
+                                case <-time.After(500 * time.Millisecond):
                                 }
                                 deskName := getActiveDesktopNameString()
                                 if deskName == "Winlogon" {
-                                        // UAC prompt or lock screen detected
-                                        // Get the current session code from the client
+                                        // UAC prompt or lock screen detected.
+                                        // Write signal file with session code + server URL
+                                        // so the SYSTEM service can launch the helper.
                                         var sessionCode string
                                         if globalClient != nil {
                                                 globalClient.connMu.Lock()
                                                 sessionCode = globalClient.code
                                                 globalClient.connMu.Unlock()
                                         }
-                                        if sessionCode != "" && winlogonPid == 0 {
-                                                exe, _ := os.Executable()
-                                                pid, err := launchHelperOnWinlogonDesktop(exe,
-                                                        fmt.Sprintf("--winlogon-helper --code %s --server %s",
-                                                                sessionCode, server))
-                                                if err != nil {
-                                                        log.Printf("[unattended] Winlogon helper failed: %v", err)
-                                                } else {
-                                                        winlogonPid = pid
-                                                        log.Printf("[unattended] Launched Winlogon helper (pid=%d) for UAC", pid)
-                                                }
+                                        if sessionCode != "" {
+                                                signalContent := fmt.Sprintf("%s\n%s\n%s\n",
+                                                        sessionCode, server, os.Getenv("COMPUTERNAME"))
+                                                os.WriteFile(signalPath, []byte(signalContent), 0644)
                                         }
                                 } else {
-                                        winlogonPid = 0
+                                        // Back on Default desktop — remove signal
+                                        os.Remove(signalPath)
                                 }
                         }
                 }()

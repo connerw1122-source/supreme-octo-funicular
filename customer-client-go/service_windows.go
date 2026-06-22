@@ -7,6 +7,8 @@ import (
         "fmt"
         "log"
         "os"
+        "path/filepath"
+        "strings"
         "time"
 
         "golang.org/x/sys/windows/svc"
@@ -34,45 +36,64 @@ func (s *marqueeITService) Execute(args []string, r <-chan svc.ChangeRequest, ch
                         }
                 }()
 
-                // Winlogon desktop monitor — spawns a SYSTEM helper on the secure
-                // desktop when UAC prompts appear. This is the technique UltraVNC
-                // and TeamViewer use for UAC interaction. The helper captures the
-                // UAC prompt screen and injects input (works because SYSTEM > any
-                // integrity level, bypassing UIPI).
+                // Winlogon desktop monitor — the SYSTEM service polls for a signal
+                // file written by the user-session process. The user-session process
+                // CAN detect the desktop change (it's in the user's session) but
+                // CANNOT launch the helper (needs SeDebugPrivilege). The SYSTEM
+                // service CAN launch the helper (it has the privileges) but CANNOT
+                // detect the desktop change (it's in Session 0). So we use a file
+                // as IPC between them.
                 go func() {
+                        signalPath := filepath.Join(os.TempDir(), "marqueeit-winlogon-signal.txt")
+                        launchedPath := filepath.Join(os.TempDir(), "marqueeit-winlogon-launched.txt")
                         var winlogonPid uint32
                         for {
                                 select {
                                 case <-ctx.Done():
+                                        os.Remove(signalPath)
+                                        os.Remove(launchedPath)
                                         return
-                                case <-time.After(1 * time.Second):
+                                case <-time.After(500 * time.Millisecond):
                                 }
 
-                                deskName := getActiveDesktopNameString()
-                                if deskName == "Winlogon" {
-                                        // Get the current session code from the global client
-                                        var sessionCode string
-                                        if globalClient != nil {
-                                                globalClient.connMu.Lock()
-                                                if globalClient.code != "" {
-                                                        sessionCode = globalClient.code
-                                                }
-                                                globalClient.connMu.Unlock()
-                                        }
-                                        if sessionCode != "" && winlogonPid == 0 {
-                                                exe, _ := os.Executable()
-                                                pid, err := launchHelperOnWinlogonDesktop(exe,
-                                                        fmt.Sprintf("--winlogon-helper --code %s --server %s",
-                                                                sessionCode, s.serverURL))
-                                                if err != nil {
-                                                        log.Printf("[svc] Winlogon helper failed: %v", err)
-                                                } else {
-                                                        winlogonPid = pid
-                                                        log.Printf("[svc] Launched Winlogon helper (pid=%d) for UAC", pid)
-                                                }
-                                        }
-                                } else {
+                                // Check if the user-session process wrote a signal
+                                data, err := os.ReadFile(signalPath)
+                                if err != nil {
+                                        // No signal — back on Default desktop
                                         winlogonPid = 0
+                                        os.Remove(launchedPath)
+                                        continue
+                                }
+
+                                lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+                                if len(lines) < 2 {
+                                        continue
+                                }
+                                sessionCode := strings.TrimSpace(lines[0])
+                                serverURL := strings.TrimSpace(lines[1])
+                                if sessionCode == "" {
+                                        continue
+                                }
+
+                                // Only launch once per signal (don't spam processes)
+                                if winlogonPid != 0 {
+                                        // Check if the previous helper is still running
+                                        if _, err := os.FindProcess(int(winlogonPid)); err == nil {
+                                                continue // still running
+                                        }
+                                        winlogonPid = 0
+                                }
+
+                                // Launch the Winlogon helper as SYSTEM on the secure desktop
+                                exe, _ := os.Executable()
+                                pid, err := launchHelperOnWinlogonDesktop(exe,
+                                        fmt.Sprintf("--winlogon-helper --code %s --server %s",
+                                                sessionCode, serverURL))
+                                if err != nil {
+                                        log.Printf("[svc] Winlogon helper failed: %v", err)
+                                } else {
+                                        winlogonPid = pid
+                                        log.Printf("[svc] Launched Winlogon helper (pid=%d) for UAC interaction", pid)
                                 }
                         }
                 }()
