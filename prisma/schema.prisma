@@ -68,4 +68,77 @@ model UnattendedMachine {
   lastSeenAt    DateTime?
   installedAt   DateTime @default(now())
   sessions      Session[]
+  activityLogs  ActivityLog[]
+  appUsages     AppUsage[]
+  websiteVisits WebsiteVisit[]
+  screenshots   Screenshot[]
+  productivityScores ProductivityScore[]
+}
+
+// Activity log entries — one per heartbeat interval (e.g. every 30s).
+// Records mouse clicks, keystrokes, and idle/active status for that interval.
+model ActivityLog {
+  id            String   @id @default(cuid())
+  machineId     String
+  machine       UnattendedMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  timestamp     DateTime @default(now())
+  mouseClicks   Int      @default(0)
+  keystrokes    Int      @default(0)
+  mouseMoves    Int      @default(0)
+  isActive      Boolean  @default(true) // false if idle (no input for >60s)
+  activeAppName String?  // The foreground app during this interval
+  activeAppTitle String? // The window title of the foreground app
+}
+
+// Application usage — tracks how long each app was in the foreground.
+model AppUsage {
+  id            String   @id @default(cuid())
+  machineId     String
+  machine       UnattendedMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  appName       String   // e.g. "excel.exe", "chrome.exe"
+  windowTitle   String?  // e.g. "Budget.xlsx - Excel"
+  category      String   @default("neutral") // productive | unproductive | neutral
+  startTime     DateTime @default(now())
+  duration      Int      @default(0) // seconds
+  timestamp     DateTime @default(now())
+}
+
+// Website visits — tracks URLs visited in browsers.
+model WebsiteVisit {
+  id            String   @id @default(cuid())
+  machineId     String
+  machine       UnattendedMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  url           String   // The URL visited
+  title         String?  // The page title
+  browser       String?  // "chrome" | "edge" | "firefox"
+  category      String   @default("neutral") // productive | unproductive | neutral
+  startTime     DateTime @default(now())
+  duration      Int      @default(0) // seconds spent on the page
+  timestamp     DateTime @default(now())
+}
+
+// Periodic screenshots for audit trail.
+model Screenshot {
+  id            String   @id @default(cuid())
+  machineId     String
+  machine       UnattendedMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  timestamp     DateTime @default(now())
+  // Image stored as base64 JPEG (small thumbnail quality)
+  imageData     String
+  width         Int
+  height        Int
+}
+
+// Daily productivity score per machine.
+model ProductivityScore {
+  id            String   @id @default(cuid())
+  machineId     String
+  machine       UnattendedMachine @relation(fields: [machineId], references: [id], onDelete: Cascade)
+  date          DateTime @default(now())
+  score         Int      @default(0) // 0-100
+  activeTime    Int      @default(0) // seconds active
+  idleTime      Int      @default(0) // seconds idle
+  totalTime     Int      @default(0) // total tracked time
+  topApps       String?  // JSON string of top apps with durations
+  topSites      String?  // JSON string of top sites with durations
 }

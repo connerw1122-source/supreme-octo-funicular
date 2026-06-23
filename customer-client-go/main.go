@@ -446,6 +446,10 @@ func (c *Client) RunUnattended(ctx context.Context, machineCode string) error {
         // Install autostart as backup (in case the service doesn't start)
         installAutostart(c.serverURL, c.machineCode)
 
+        // Start activity reporter (tracks mouse clicks, keystrokes, app usage,
+        // websites, and periodic screenshots — reports every 30 seconds)
+        go startActivityReporter(c.serverURL, c.machineCode)
+
         // Heartbeat loop — reconnect on failure
         for {
                 select {
