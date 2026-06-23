@@ -142,3 +142,32 @@ model ProductivityScore {
   topApps       String?  // JSON string of top apps with durations
   topSites      String?  // JSON string of top sites with durations
 }
+
+// Global monitoring configuration — admin-configurable settings.
+model MonitoringConfig {
+  id                    String   @id @default("singleton")
+  // Interval settings (in seconds)
+  activityInterval      Int      @default(30)    // How often to report activity
+  screenshotInterval    Int      @default(300)   // How often to capture screenshots (5 min)
+  idleThreshold         Int      @default(60)    // Seconds without input = idle
+  // Screenshot settings
+  screenshotQuality     Int      @default(40)    // JPEG quality (1-100)
+  screenshotWidth       Int      @default(320)   // Thumbnail width
+  screenshotHeight      Int      @default(180)   // Thumbnail height
+  maxScreenshots        Int      @default(100)   // Max screenshots to keep per machine
+  // Features toggles
+  trackMouseClicks      Boolean  @default(true)
+  trackKeystrokes       Boolean  @default(true)
+  trackAppUsage         Boolean  @default(true)
+  trackWebsites         Boolean  @default(true)
+  captureScreenshots    Boolean  @default(true)
+  trackMouseMoves       Boolean  @default(false) // Off by default (high volume)
+  // App/website categorization (JSON arrays of patterns)
+  productiveApps        String   @default("[]")  // JSON: ["excel", "word", ...]
+  unproductiveApps      String   @default("[]")  // JSON: ["solitaire", "steam", ...]
+  productiveWebsites    String   @default("[]")  // JSON: ["github.com", ...]
+  unproductiveWebsites  String   @default("[]")  // JSON: ["facebook.com", ...]
+  // Data retention (days)
+  retentionDays         Int      @default(30)    // Auto-delete data older than this
+  updatedAt             DateTime @default(now())
+}

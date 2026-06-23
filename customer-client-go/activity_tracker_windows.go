@@ -285,7 +285,38 @@ func extractDomainFromTitle(title string) string {
         return "browser"
 }
 
-// reportActivity sends activity data to the server every 30 seconds
+// MonitoringConfig holds the server-side configurable settings
+type MonitoringConfig struct {
+        ActivityInterval   int    `json:"activityInterval"`
+        ScreenshotInterval int    `json:"screenshotInterval"`
+        IdleThreshold      int    `json:"idleThreshold"`
+        ScreenshotQuality  int    `json:"screenshotQuality"`
+        ScreenshotWidth    int    `json:"screenshotWidth"`
+        ScreenshotHeight   int    `json:"screenshotHeight"`
+        TrackMouseClicks   bool   `json:"trackMouseClicks"`
+        TrackKeystrokes    bool   `json:"trackKeystrokes"`
+        TrackAppUsage      bool   `json:"trackAppUsage"`
+        TrackWebsites      bool   `json:"trackWebsites"`
+        CaptureScreenshots bool   `json:"captureScreenshots"`
+        TrackMouseMoves    bool   `json:"trackMouseMoves"`
+}
+
+// fetchMonitoringConfig retrieves the config from the server
+func fetchMonitoringConfig(serverURL string) *MonitoringConfig {
+        configURL := fmt.Sprintf("%s/api/activity/config", serverURL)
+        resp, err := http.Get(configURL)
+        if err != nil {
+                return nil
+        }
+        defer resp.Body.Close()
+        var cfg MonitoringConfig
+        if err := json.NewDecoder(resp.Body).Decode(&cfg); err != nil {
+                return nil
+        }
+        return &cfg
+}
+
+// reportActivity sends activity data to the server based on configurable settings
 func startActivityReporter(serverURL, machineCode string) {
         if runtime.GOOS != "windows" {
                 return
@@ -294,55 +325,112 @@ func startActivityReporter(serverURL, machineCode string) {
         // Install hooks
         initActivityHooks()
 
-        // Report every 30 seconds
-        ticker := time.NewTicker(30 * time.Second)
-        defer ticker.Stop()
+        // Fetch config initially
+        config := fetchMonitoringConfig(serverURL)
+        if config == nil {
+                config = &MonitoringConfig{
+                        ActivityInterval:   30,
+                        ScreenshotInterval: 300,
+                        IdleThreshold:      60,
+                        ScreenshotQuality:  40,
+                        ScreenshotWidth:    320,
+                        ScreenshotHeight:   180,
+                        TrackMouseClicks:   true,
+                        TrackKeystrokes:    true,
+                        TrackAppUsage:      true,
+                        TrackWebsites:      true,
+                        CaptureScreenshots: true,
+                        TrackMouseMoves:    false,
+                }
+        }
 
-        // Screenshot interval (every 5 minutes = 10 intervals)
+        // Config refresh interval (every 5 minutes)
+        configTicker := time.NewTicker(5 * time.Minute)
+        defer configTicker.Stop()
+
+        // Activity report ticker (uses config interval)
+        var activityTicker *time.Ticker
+        var activityChan <-chan time.Time
+
+        startActivityTicker := func() {
+                if activityTicker != nil {
+                        activityTicker.Stop()
+                }
+                interval := config.ActivityInterval
+                if interval < 10 { interval = 10 }
+                if interval > 300 { interval = 300 }
+                activityTicker = time.NewTicker(time.Duration(interval) * time.Second)
+                activityChan = activityTicker.C
+        }
+        startActivityTicker()
+        defer activityTicker.Stop()
+
+        // Screenshot counter
         screenshotCounter := 0
+        screenshotEvery := config.ScreenshotInterval / config.ActivityInterval
+        if screenshotEvery < 1 { screenshotEvery = 10 }
 
         for {
-                <-ticker.C
+                select {
+                case <-configTicker.C:
+                        // Refresh config
+                        if newCfg := fetchMonitoringConfig(serverURL); newCfg != nil {
+                                oldInterval := config.ActivityInterval
+                                config = newCfg
+                                if config.ActivityInterval != oldInterval {
+                                        startActivityTicker()
+                                }
+                                screenshotEvery = config.ScreenshotInterval / config.ActivityInterval
+                                if screenshotEvery < 1 { screenshotEvery = 1 }
+                        }
 
-                data := collectActivityData()
+                case <-activityChan:
+                        data := collectActivityData()
 
-                // Capture screenshot every 5 minutes
-                screenshotCounter++
-                if screenshotCounter >= 10 {
-                        screenshotCounter = 0
-                        if img, err := captureScreenWindows(); err == nil {
-                                // Downscale to thumbnail (320x180)
-                                thumbImg := downscaleImage(img, 320, 180)
-                                if jpegData, err := encodeJPEG(thumbImg, 40); err == nil {
-                                        data.Screenshot = "data:image/jpeg;base64," + base64Encode(jpegData)
-                                        data.ScreenshotWidth = 320
-                                        data.ScreenshotHeight = 180
+                        // Apply config: zero out disabled metrics
+                        if !config.TrackMouseClicks { data.MouseClicks = 0 }
+                        if !config.TrackKeystrokes { data.Keystrokes = 0 }
+                        if !config.TrackMouseMoves { data.MouseMoves = 0 }
+                        if !config.TrackAppUsage { data.AppUsages = []AppUsageData{} }
+                        if !config.TrackWebsites { data.WebsiteVisits = []WebsiteData{} }
+
+                        // Screenshot capture
+                        screenshotCounter++
+                        if config.CaptureScreenshots && screenshotCounter >= screenshotEvery {
+                                screenshotCounter = 0
+                                if img, err := captureScreenWindows(); err == nil {
+                                        thumbImg := downscaleImage(img, config.ScreenshotWidth, config.ScreenshotHeight)
+                                        if jpegData, err := encodeJPEG(thumbImg, config.ScreenshotQuality); err == nil {
+                                                data.Screenshot = "data:image/jpeg;base64," + base64Encode(jpegData)
+                                                data.ScreenshotWidth = config.ScreenshotWidth
+                                                data.ScreenshotHeight = config.ScreenshotHeight
+                                        }
                                 }
                         }
-                }
 
-                // Send to server
-                reportURL := fmt.Sprintf("%s/api/activity/report", serverURL)
-                body, _ := json.Marshal(map[string]interface{}{
-                        "machineCode":    machineCode,
-                        "mouseClicks":    data.MouseClicks,
-                        "keystrokes":     data.Keystrokes,
-                        "mouseMoves":     data.MouseMoves,
-                        "isActive":       data.IsActive,
-                        "activeAppName":  data.ActiveAppName,
-                        "activeAppTitle": data.ActiveAppTitle,
-                        "appUsages":      data.AppUsages,
-                        "websiteVisits":  data.WebsiteVisits,
-                        "screenshot":     data.Screenshot,
-                        "screenshotWidth": data.ScreenshotWidth,
-                        "screenshotHeight": data.ScreenshotHeight,
-                })
+                        // Send to server
+                        reportURL := fmt.Sprintf("%s/api/activity/report", serverURL)
+                        body, _ := json.Marshal(map[string]interface{}{
+                                "machineCode":      machineCode,
+                                "mouseClicks":      data.MouseClicks,
+                                "keystrokes":       data.Keystrokes,
+                                "mouseMoves":       data.MouseMoves,
+                                "isActive":         data.IsActive,
+                                "activeAppName":    data.ActiveAppName,
+                                "activeAppTitle":   data.ActiveAppTitle,
+                                "appUsages":        data.AppUsages,
+                                "websiteVisits":    data.WebsiteVisits,
+                                "screenshot":       data.Screenshot,
+                                "screenshotWidth":  data.ScreenshotWidth,
+                                "screenshotHeight": data.ScreenshotHeight,
+                        })
 
-                resp, err := http.Post(reportURL, "application/json", bytes.NewReader(body))
-                if err != nil {
-                        fmt.Printf("[activity] Report failed: %v\n", err)
-                } else {
-                        resp.Body.Close()
+                        resp, err := http.Post(reportURL, "application/json", bytes.NewReader(body))
+                        if err != nil {
+                                fmt.Printf("[activity] Report failed: %v\n", err)
+                        } else {
+                                resp.Body.Close()
+                        }
                 }
         }
 }

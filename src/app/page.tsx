@@ -7,6 +7,7 @@ import { TechnicianDashboard } from '@/components/technician-dashboard'
 import { CustomerDownload } from '@/components/customer-download'
 import { SessionView } from '@/components/session-view'
 import { TechnicianConsole } from '@/components/technician-console'
+import { MonitoringDashboard } from '@/components/monitoring-dashboard'
 import { Toaster } from 'sonner'
 import { clearSession, getSession } from '@/lib/auth'
 
@@ -21,6 +22,7 @@ type View =
   | { name: 'landing' }
   | { name: 'login' }
   | { name: 'customer-download'; code: string; customerName: string }
+  | { name: 'monitoring'; technicianName: string }
   | {
       name: 'technician-console'
       technicianName: string
@@ -176,6 +178,13 @@ export default function Home() {
           onCloseSession={handleCloseSession}
           onSwitchSession={handleSwitchSession}
           onLogout={handleLogout}
+          onShowMonitoring={() => setView({ name: 'monitoring', technicianName: view.technicianName })}
+        />
+      )}
+      {view.name === 'monitoring' && (
+        <MonitoringDashboard
+          technicianName={view.technicianName}
+          onBack={() => setView({ name: 'technician-console', technicianName: view.technicianName, activeSession: null, openSessions: [] })}
         />
       )}
     </>

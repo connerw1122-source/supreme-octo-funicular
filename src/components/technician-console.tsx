@@ -10,6 +10,7 @@ import {
   X,
   Monitor,
   LayoutGrid,
+  Activity,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -28,6 +29,7 @@ interface TechnicianConsoleProps {
   onCloseSession: (tabId: string) => void
   onSwitchSession: (tabId: string) => void
   onLogout: () => void
+  onShowMonitoring: () => void
 }
 
 export function TechnicianConsole({
@@ -38,6 +40,7 @@ export function TechnicianConsole({
   onCloseSession,
   onSwitchSession,
   onLogout,
+  onShowMonitoring,
 }: TechnicianConsoleProps) {
   const [showDashboard, setShowDashboard] = useState(!activeSession)
 
@@ -88,6 +91,13 @@ export function TechnicianConsole({
             >
               <LayoutGrid className="w-3.5 h-3.5" />
               Dashboard
+            </button>
+            <button
+              onClick={onShowMonitoring}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-xs font-medium transition-colors whitespace-nowrap text-slate-400 hover:text-slate-200 hover:bg-slate-800/50"
+            >
+              <Activity className="w-3.5 h-3.5" />
+              Monitor
             </button>
 
             {/* Session tabs */}
